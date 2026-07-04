@@ -4,6 +4,7 @@ import {
   getConversations,
   getConversation,
   getMessages,
+  getLeadForConversation,
 } from "@/lib/queries";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui";
@@ -38,6 +39,7 @@ export default async function ConversasPage({
   const isPaused = selected?.chat_id
     ? paused.includes(selected.chat_id)
     : false;
+  const lead = selected ? await getLeadForConversation(selected) : null;
 
   return (
     <>
@@ -105,6 +107,7 @@ export default async function ConversasPage({
                 conversation={selected}
                 messages={messages}
                 isPaused={isPaused}
+                lead={lead}
               />
             </div>
           ) : (

@@ -168,6 +168,141 @@ export async function getConversation(
   return row ?? null;
 }
 
+// Atribuição de lead (Meta Lead Ads) ----------------------------------
+
+export type LeadField = { name: string; values: string[] };
+
+export type MetaLead = {
+  source: "form" | "ctwa";
+  lead_id: string | null;
+  created_time: string | null;
+  page_name: string | null;
+  form_name: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  ad_name: string | null;
+  platform: string | null;
+  full_name: string | null;
+  phone: string | null;
+  phone_norm: string | null;
+  email: string | null;
+  field_data: LeadField[] | null;
+  headline: string | null;
+  body: string | null;
+};
+
+const LEAD_COLS = `lead_id, created_time, page_name, form_name, campaign_name,
+                   adset_name, ad_name, platform, full_name, phone, phone_norm,
+                   email, field_data`;
+
+type CtwaRow = {
+  phone_norm: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  ad_name: string | null;
+  headline: string | null;
+  body: string | null;
+  source_url: string | null;
+  ts: string | null;
+  source_id: string | null;
+};
+
+/**
+ * Casa a conversa (chat_id + channel) com um lead do formulário Meta.
+ * WhatsApp/telefone: match por dígitos (exato, senão sufixo dos últimos 8 —
+ * cobre variação de DDI/9º dígito). E-mail: match por endereço.
+ * Best-effort: qualquer erro (tabela ausente etc.) retorna null.
+ */
+export async function getLeadForConversation(
+  conversation: Pick<ConversationRow, "chat_id" | "channel">,
+): Promise<MetaLead | null> {
+  const chatId = conversation.chat_id?.trim();
+  if (!chatId) return null;
+
+  const channel = (conversation.channel ?? "").toLowerCase();
+  const isEmail =
+    channel.includes("mail") || chatId.includes("@");
+
+  try {
+    if (isEmail) {
+      const [row] = await sql.unsafe<Omit<MetaLead, "source" | "headline" | "body">[]>(
+        `select ${LEAD_COLS} from public.meta_leads
+         where lower(email) = lower($1)
+         order by created_time desc nulls last limit 1`,
+        [chatId],
+      );
+      return row ? { ...row, source: "form", headline: null, body: null } : null;
+    }
+
+    const digits = chatId.replace(/\D/g, "");
+    if (!digits) return null;
+    const suffix = digits.length >= 8 ? digits.slice(-8) : null;
+
+    const [formRow] = await sql.unsafe<Omit<MetaLead, "source" | "headline" | "body">[]>(
+      `select ${LEAD_COLS} from public.meta_leads
+       where phone_norm = $1
+         ${suffix ? "or right(phone_norm, 8) = $2" : ""}
+       order by (phone_norm = $1) desc, created_time desc nulls last
+       limit 1`,
+      suffix ? [digits, suffix] : [digits],
+    );
+    if (formRow) return { ...formRow, source: "form", headline: null, body: null };
+
+    // Fallback: anúncio Click-to-WhatsApp (sem formulário).
+    return getCtwaLead(digits, suffix);
+  } catch {
+    return null;
+  }
+}
+
+function ctwaTimestamp(ts: string | null): string | null {
+  if (!ts) return null;
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  // epoch em segundos (10 dígitos) vs milissegundos (13 dígitos).
+  const ms = n < 1e12 ? n * 1000 : n;
+  return new Date(ms).toISOString();
+}
+
+async function getCtwaLead(
+  digits: string,
+  suffix: string | null,
+): Promise<MetaLead | null> {
+  try {
+    const [row] = await sql.unsafe<CtwaRow[]>(
+      `select phone_norm, campaign_name, adset_name, ad_name, headline, body,
+              source_url, ts, source_id
+       from public.ctwa_referrals
+       where phone_norm = $1
+         ${suffix ? "or right(phone_norm, 8) = $2" : ""}
+       order by (phone_norm = $1) desc, ts desc nulls last
+       limit 1`,
+      suffix ? [digits, suffix] : [digits],
+    );
+    if (!row) return null;
+    return {
+      source: "ctwa",
+      lead_id: row.source_id,
+      created_time: ctwaTimestamp(row.ts),
+      page_name: null,
+      form_name: null,
+      campaign_name: row.campaign_name,
+      adset_name: row.adset_name,
+      ad_name: row.ad_name,
+      platform: null,
+      full_name: null,
+      phone: row.phone_norm,
+      phone_norm: row.phone_norm,
+      email: null,
+      field_data: null,
+      headline: row.headline,
+      body: row.body,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Pipeline -------------------------------------------------------------
 
 export const STAGES = ["Novo", "Em conversa", "Agendado", "Perdido"] as const;

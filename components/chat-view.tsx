@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { ArrowLeft, Bot, User, DollarSign } from "lucide-react";
-import type { ConversationRow, MessageRow } from "@/lib/queries";
+import type { ConversationRow, MessageRow, MetaLead } from "@/lib/queries";
 import { Badge } from "./ui";
 import { ChannelIcon } from "./channel-icon";
 import { ChatControls } from "./chat-controls";
+import { LeadCard } from "./lead-card";
 import { cleanMessage } from "@/lib/clean-content";
 import { channelLabel, formatDateTime, formatUSD } from "@/lib/utils";
 
@@ -12,11 +13,13 @@ export function ChatView({
   conversation,
   messages,
   isPaused,
+  lead,
 }: {
   slug: string;
   conversation: ConversationRow;
   messages: MessageRow[];
   isPaused: boolean;
+  lead: MetaLead | null;
 }) {
   return (
     <div className="flex h-[calc(100dvh-8rem)] flex-col rounded-xl border border-border bg-surface">
@@ -49,6 +52,8 @@ export function ChatView({
           </span>
         </div>
       </div>
+
+      <LeadCard lead={lead} />
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
         {messages.length === 0 ? (
