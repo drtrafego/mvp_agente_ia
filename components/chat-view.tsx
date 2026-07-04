@@ -3,21 +3,20 @@ import { ArrowLeft, Bot, User, DollarSign } from "lucide-react";
 import type { ConversationRow, MessageRow } from "@/lib/queries";
 import { Badge } from "./ui";
 import { ChannelIcon } from "./channel-icon";
-import {
-  channelLabel,
-  formatDateTime,
-  formatUSD,
-  formatNumber,
-} from "@/lib/utils";
+import { ChatControls } from "./chat-controls";
+import { cleanMessage } from "@/lib/clean-content";
+import { channelLabel, formatDateTime, formatUSD } from "@/lib/utils";
 
 export function ChatView({
   slug,
   conversation,
   messages,
+  isPaused,
 }: {
   slug: string;
   conversation: ConversationRow;
   messages: MessageRow[];
+  isPaused: boolean;
 }) {
   return (
     <div className="flex h-[calc(100dvh-8rem)] flex-col rounded-xl border border-border bg-surface">
@@ -57,19 +56,31 @@ export function ChatView({
             Nenhuma mensagem registrada nesta conversa.
           </p>
         ) : (
-          messages.map((m) => <Bubble key={m.id} message={m} />)
+          messages.map((m) => (
+            <Bubble key={m.id} message={m} channel={conversation.channel} />
+          ))
         )}
       </div>
 
-      <div className="border-t border-border px-4 py-2.5 text-xs text-muted">
-        {formatNumber(messages.length)} mensagens nesta conversa
-      </div>
+      <ChatControls
+        slug={slug}
+        chatId={conversation.chat_id}
+        isPaused={isPaused}
+        messageCount={messages.length}
+      />
     </div>
   );
 }
 
-function Bubble({ message }: { message: MessageRow }) {
+function Bubble({
+  message,
+  channel,
+}: {
+  message: MessageRow;
+  channel: string | null;
+}) {
   const isUser = message.role === "user";
+  const content = cleanMessage(message.content, message.role, channel);
   return (
     <div
       className={`flex items-end gap-2.5 ${
@@ -92,7 +103,7 @@ function Bubble({ message }: { message: MessageRow }) {
             : "rounded-br-sm bg-primary/15 text-fg ring-1 ring-inset ring-primary/25"
         }`}
       >
-        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+        <p className="whitespace-pre-wrap break-words">{content}</p>
         {message.ts ? (
           <span className="mt-1 block text-[10px] text-muted-2">
             {formatDateTime(message.ts)}

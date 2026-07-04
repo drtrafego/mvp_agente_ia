@@ -35,6 +35,15 @@ Na Vercel, configure as variáveis de ambiente:
 - `DATABASE_URL` (obrigatória): connection string do Neon.
 - `DASHBOARD_PASSWORD` (opcional): se definida, ativa um gate de senha simples
   (login em `/login`, cookie httpOnly). Vazia ou ausente = dashboard aberto.
+- `PAINEL_API_TOKEN` (obrigatória para os controles da aba Conversas): Bearer token
+  da Control API do Hermes. Usado só server-side (Server Actions), nunca exposto ao client.
+- `HERMES_PANEL_URL` (opcional): base da Control API do Hermes.
+  Default `https://hermes.casaldotrafego.com/agente`.
+
+Na aba **Conversas** dá para pausar/retomar o bot por conversa (handoff humano) e
+responder o lead manualmente. Essas ações chamam a Control API do Hermes via Server
+Actions (`lib/actions.ts`). Sem `PAINEL_API_TOKEN` as ações retornam erro amigável no UI
+e o build/render seguem normais.
 
 As páginas de dados são `force-dynamic` (renderizadas a cada request), então o
 build **não** depende do banco.

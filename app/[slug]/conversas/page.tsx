@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui";
 import { ChannelIcon } from "@/components/channel-icon";
 import { ChatView } from "@/components/chat-view";
+import { getPausedChatIds } from "@/lib/actions";
 import {
   channelLabel,
   formatDateTime,
@@ -31,6 +32,12 @@ export default async function ConversasPage({
   const conversations = await getConversations(slug);
   const selected = c ? await getConversation(slug, c) : null;
   const messages = selected ? await getMessages(slug, selected.session_id) : [];
+  const paused = selected?.chat_id
+    ? await getPausedChatIds(slug)
+    : [];
+  const isPaused = selected?.chat_id
+    ? paused.includes(selected.chat_id)
+    : false;
 
   return (
     <>
@@ -93,7 +100,12 @@ export default async function ConversasPage({
         <div className={`${selected ? "block" : "hidden lg:block"}`}>
           {selected ? (
             <div className="animate-fade-up">
-              <ChatView slug={slug} conversation={selected} messages={messages} />
+              <ChatView
+                slug={slug}
+                conversation={selected}
+                messages={messages}
+                isPaused={isPaused}
+              />
             </div>
           ) : (
             <Placeholder />
