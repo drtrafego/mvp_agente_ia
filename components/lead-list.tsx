@@ -196,7 +196,9 @@ export function LeadList({
                 <th className="hidden px-4 py-3 font-medium lg:table-cell">
                   Data
                 </th>
-                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="hidden px-4 py-3 font-medium sm:table-cell">
+                  Status
+                </th>
                 <th className="hidden px-4 py-3 font-medium sm:table-cell">
                   Disparo
                 </th>
@@ -232,9 +234,25 @@ export function LeadList({
                         <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-2/15 text-[#c4b5fd]">
                           <User className="size-3.5" />
                         </span>
-                        <span className="truncate font-medium">
-                          {lead.full_name ?? "Sem nome"}
-                        </span>
+                        <div className="min-w-0">
+                          <span className="block truncate font-medium">
+                            {lead.full_name ?? "Sem nome"}
+                          </span>
+                          {/* status inline só no mobile (a coluna Status some no celular) */}
+                          <span className="mt-1 flex sm:hidden">
+                            {lead.conversou ? (
+                              <Badge tone="success">
+                                <CheckCircle2 className="size-3" />
+                                Conversou
+                              </Badge>
+                            ) : (
+                              <Badge tone="accent">
+                                <Clock className="size-3" />
+                                Aguardando
+                              </Badge>
+                            )}
+                          </span>
+                        </div>
                       </div>
                     </td>
                     <td className="tnum px-4 py-3 text-muted">
@@ -249,7 +267,7 @@ export function LeadList({
                     <td className="hidden whitespace-nowrap px-4 py-3 text-muted lg:table-cell">
                       {lead.created_time ? formatDate(lead.created_time) : "—"}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="hidden px-4 py-3 sm:table-cell">
                       {lead.conversou ? (
                         <Badge tone="success">
                           <CheckCircle2 className="size-3" />

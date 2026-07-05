@@ -460,3 +460,323 @@ export async function getLeads(slug: string): Promise<Record<Stage, Lead[]>> {
   }
   return board;
 }
+
+// Dashboard "Visão geral" (gestor de tráfego) -------------------------
+
+export type Period = "today" | "7d" | "30d";
+
+export type Delta = { current: number; previous: number };
+
+export type DashboardData = {
+  period: Period;
+  leads: Delta;
+  leadsToday: number;
+  conversas: Delta;
+  conversaram: Delta;
+  engajaram: number;
+  agendaram: number;
+  conversasAtivas: number;
+  custoUsd: Delta;
+  timeline: { day: string; leads: number; conversas: number; cost: number }[];
+  adRanking: {
+    ad_name: string;
+    campaign_name: string;
+    leads: number;
+    conversaram: number;
+    taxa: number;
+  }[];
+  byPlatform: { platform: string; value: number }[];
+  topCampaigns: { campaign: string; value: number }[];
+  byChannel: { channel: string; value: number }[];
+  bot: { avgFirstRespSec: number | null; avgMsgs: number };
+  recent: {
+    session_id: string;
+    chat_id: string | null;
+    channel: string | null;
+    title: string | null;
+    started_at: string | null;
+    message_count: number | null;
+    full_name: string | null;
+  }[];
+};
+
+function periodRange(period: Period) {
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  let curStart: Date;
+  let prevStart: Date;
+  let prevEnd: Date;
+
+  if (period === "today") {
+    curStart = new Date(startOfToday);
+    prevEnd = new Date(startOfToday);
+    prevStart = new Date(startOfToday);
+    prevStart.setDate(prevStart.getDate() - 1);
+  } else {
+    const days = period === "30d" ? 30 : 7;
+    curStart = new Date(now.getTime() - days * 86400000);
+    prevEnd = new Date(curStart);
+    prevStart = new Date(now.getTime() - 2 * days * 86400000);
+  }
+
+  return {
+    curStart: curStart.toISOString(),
+    curEnd: now.toISOString(),
+    prevStart: prevStart.toISOString(),
+    prevEnd: prevEnd.toISOString(),
+    todayStart: startOfToday.toISOString(),
+  };
+}
+
+function daysBetween(startIso: string, endIso: string): string[] {
+  const out: string[] = [];
+  const d = new Date(startIso);
+  d.setUTCHours(0, 0, 0, 0);
+  const end = new Date(endIso);
+  let guard = 0;
+  while (d <= end && guard < 400) {
+    out.push(d.toISOString().slice(0, 10));
+    d.setUTCDate(d.getUTCDate() + 1);
+    guard++;
+  }
+  return out;
+}
+
+/** Predicado SQL: lead (alias l) casa com alguma conversa do agente. */
+function convMatch(schema: string, extra = ""): string {
+  return `exists (
+    select 1 from "${schema}".conversations c
+    where l.phone_norm is not null and l.phone_norm <> '' and (
+      regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+      or (length(l.phone_norm) >= 8
+          and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+              = right(l.phone_norm, 8))
+    ) ${extra}
+  )`;
+}
+
+type SqlParam = string | number | null;
+
+async function scalar(query: string, params: SqlParam[]): Promise<number> {
+  try {
+    const [row] = await sql.unsafe<{ v: string | number | null }[]>(query, params);
+    return Number(row?.v ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+async function rowsSafe<T>(query: string, params: SqlParam[] = []): Promise<T[]> {
+  try {
+    return await sql.unsafe<T[]>(query, params);
+  } catch {
+    return [];
+  }
+}
+
+export async function getDashboard(
+  slug: string,
+  period: Period,
+): Promise<DashboardData> {
+  const schema = safeSchema(slug);
+  const { curStart, curEnd, prevStart, prevEnd, todayStart } =
+    periodRange(period);
+
+  const leadsCount = (a: string, b: string) =>
+    scalar(
+      `select count(*)::int v from public.meta_leads
+       where created_time >= $1 and created_time < $2`,
+      [a, b],
+    );
+
+  const leadsConversaram = (a: string, b: string) =>
+    scalar(
+      `select count(*)::int v from public.meta_leads l
+       where l.created_time >= $1 and l.created_time < $2 and ${convMatch(schema)}`,
+      [a, b],
+    );
+
+  const convCount = (a: string, b: string) =>
+    scalar(
+      `select count(*)::int v from "${schema}".conversations
+       where started_at >= $1 and started_at < $2`,
+      [a, b],
+    );
+
+  const custo = (a: string, b: string) =>
+    scalar(
+      `select coalesce(sum(cost_usd), 0)::numeric v from "${schema}".conversations
+       where started_at >= $1 and started_at < $2`,
+      [a, b],
+    );
+
+  const [
+    leadsCur,
+    leadsPrev,
+    leadsToday,
+    convCur,
+    convPrev,
+    conversaramCur,
+    conversaramPrev,
+    engajaram,
+    conversasAtivas,
+    custoCur,
+    custoPrev,
+  ] = await Promise.all([
+    leadsCount(curStart, curEnd),
+    leadsCount(prevStart, prevEnd),
+    scalar(
+      `select count(*)::int v from public.meta_leads where created_time >= $1`,
+      [todayStart],
+    ),
+    convCount(curStart, curEnd),
+    convCount(prevStart, prevEnd),
+    leadsConversaram(curStart, curEnd),
+    leadsConversaram(prevStart, prevEnd),
+    scalar(
+      `select count(*)::int v from public.meta_leads l
+       where l.created_time >= $1 and l.created_time < $2
+         and ${convMatch(schema, "and coalesce(c.message_count, 0) >= 4")}`,
+      [curStart, curEnd],
+    ),
+    scalar(
+      `select count(distinct session_id)::int v from "${schema}".messages
+       where ts >= now() - interval '24 hours'`,
+      [],
+    ),
+    custo(curStart, curEnd),
+    custo(prevStart, prevEnd),
+  ]);
+
+  const [leadsByDay, convByDay, adRanking, byPlatform, topCampaigns, byChannel, recent] =
+    await Promise.all([
+      rowsSafe<{ day: string; v: number }>(
+        `select to_char(date_trunc('day', created_time), 'YYYY-MM-DD') day, count(*)::int v
+         from public.meta_leads where created_time >= $1 and created_time < $2 group by 1`,
+        [curStart, curEnd],
+      ),
+      rowsSafe<{ day: string; v: number; c: string }>(
+        `select to_char(date_trunc('day', started_at), 'YYYY-MM-DD') day,
+                count(*)::int v, coalesce(sum(cost_usd), 0)::numeric c
+         from "${schema}".conversations where started_at >= $1 and started_at < $2 group by 1`,
+        [curStart, curEnd],
+      ),
+      rowsSafe<{
+        ad_name: string;
+        campaign_name: string;
+        leads: number;
+        conversaram: number;
+      }>(
+        `select coalesce(nullif(l.ad_name, ''), '(sem anúncio)') ad_name,
+                coalesce(nullif(l.campaign_name, ''), '—') campaign_name,
+                count(*)::int leads,
+                count(*) filter (where ${convMatch(schema)})::int conversaram
+         from public.meta_leads l
+         where l.created_time >= $1 and l.created_time < $2
+         group by 1, 2
+         order by (count(*) filter (where ${convMatch(schema)})::float
+                   / nullif(count(*), 0)) desc nulls last, leads desc
+         limit 15`,
+        [curStart, curEnd],
+      ),
+      rowsSafe<{ platform: string; value: number }>(
+        `select coalesce(nullif(platform, ''), 'unknown') platform, count(*)::int value
+         from public.meta_leads where created_time >= $1 and created_time < $2
+         group by 1 order by 2 desc`,
+        [curStart, curEnd],
+      ),
+      rowsSafe<{ campaign: string; value: number }>(
+        `select coalesce(nullif(campaign_name, ''), '—') campaign, count(*)::int value
+         from public.meta_leads where created_time >= $1 and created_time < $2
+         group by 1 order by 2 desc limit 6`,
+        [curStart, curEnd],
+      ),
+      rowsSafe<{ channel: string; value: number }>(
+        `select coalesce(channel, 'unknown') channel, count(*)::int value
+         from "${schema}".conversations where started_at >= $1 and started_at < $2
+         group by 1 order by 2 desc`,
+        [curStart, curEnd],
+      ),
+      rowsSafe<{
+        session_id: string;
+        chat_id: string | null;
+        channel: string | null;
+        title: string | null;
+        started_at: string | null;
+        message_count: number | null;
+        full_name: string | null;
+      }>(
+        `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
+                c.message_count, lead.full_name
+         from "${schema}".conversations c
+         left join lateral (
+           select l.full_name from public.meta_leads l
+           where l.phone_norm is not null and l.phone_norm <> '' and (
+             regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+             or (length(l.phone_norm) >= 8
+                 and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                     = right(l.phone_norm, 8))
+           )
+           order by l.created_time desc nulls last limit 1
+         ) lead on true
+         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         limit 8`,
+        [],
+      ),
+    ]);
+
+  const [avgFirstRespSec, avgMsgs] = await Promise.all([
+    (async () => {
+      const v = await scalar(
+        `select avg(extract(epoch from (a.fa - u.fu)))::float v from (
+           select session_id, min(ts) fu from "${schema}".messages where role = 'user' group by session_id
+         ) u
+         join (
+           select session_id, min(ts) fa from "${schema}".messages where role = 'assistant' group by session_id
+         ) a on a.session_id = u.session_id
+         where a.fa > u.fu`,
+        [],
+      );
+      return v > 0 ? v : null;
+    })(),
+    scalar(
+      `select coalesce(avg(message_count), 0)::float v from "${schema}".conversations
+       where started_at >= $1 and started_at < $2 and message_count is not null`,
+      [curStart, curEnd],
+    ),
+  ]);
+
+  const leadsMap = new Map(leadsByDay.map((r) => [r.day, r.v]));
+  const convMap = new Map(convByDay.map((r) => [r.day, r.v]));
+  const costMap = new Map(convByDay.map((r) => [r.day, Number(r.c)]));
+  const timeline = daysBetween(curStart, curEnd).map((day) => ({
+    day,
+    leads: leadsMap.get(day) ?? 0,
+    conversas: convMap.get(day) ?? 0,
+    cost: costMap.get(day) ?? 0,
+  }));
+
+  return {
+    period,
+    leads: { current: leadsCur, previous: leadsPrev },
+    leadsToday,
+    conversas: { current: convCur, previous: convPrev },
+    conversaram: { current: conversaramCur, previous: conversaramPrev },
+    engajaram,
+    agendaram: 0,
+    conversasAtivas,
+    custoUsd: { current: custoCur, previous: custoPrev },
+    timeline,
+    adRanking: adRanking.map((r) => ({
+      ...r,
+      taxa: r.leads > 0 ? (r.conversaram / r.leads) * 100 : 0,
+    })),
+    byPlatform,
+    topCampaigns,
+    byChannel,
+    bot: { avgFirstRespSec, avgMsgs },
+    recent,
+  };
+}

@@ -1,3 +1,4 @@
+import { ArrowUp, ArrowDown, Minus } from "lucide-react";
 import { Card, Skeleton } from "./ui";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +10,44 @@ const TONES: Record<string, string> = {
   success: "bg-success/15 text-[#4ade80]",
 };
 
+function DeltaPill({
+  delta,
+  invert = false,
+}: {
+  delta: number | null;
+  invert?: boolean;
+}) {
+  if (delta === null) {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-muted-2">
+        <Minus className="size-3" />
+        novo
+      </span>
+    );
+  }
+  const rounded = Math.round(delta);
+  const flat = rounded === 0;
+  // subida boa por padrão; invert (ex.: custo) → subida ruim.
+  const good = flat ? false : invert ? rounded < 0 : rounded > 0;
+  const cls = flat
+    ? "bg-surface-2 text-muted-2"
+    : good
+      ? "bg-success/15 text-[#4ade80]"
+      : "bg-destructive/15 text-[#f87171]";
+  const Icon = flat ? Minus : rounded > 0 ? ArrowUp : ArrowDown;
+  return (
+    <span
+      className={cn(
+        "tnum inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
+        cls,
+      )}
+    >
+      <Icon className="size-3" />
+      {Math.abs(rounded)}%
+    </span>
+  );
+}
+
 export function KpiCard({
   label,
   value,
@@ -16,6 +55,8 @@ export function KpiCard({
   icon,
   tone = "secondary",
   featured = false,
+  delta,
+  deltaInvert = false,
 }: {
   label: string;
   value: string;
@@ -23,6 +64,8 @@ export function KpiCard({
   icon: React.ReactNode;
   tone?: keyof typeof TONES;
   featured?: boolean;
+  delta?: number | null;
+  deltaInvert?: boolean;
 }) {
   return (
     <Card
@@ -47,8 +90,13 @@ export function KpiCard({
           {icon}
         </span>
       </div>
-      <div className="tnum relative mt-3 text-2xl font-semibold tracking-tight sm:text-[1.7rem]">
-        {value}
+      <div className="relative mt-3 flex items-center gap-2">
+        <span className="tnum text-2xl font-semibold tracking-tight sm:text-[1.7rem]">
+          {value}
+        </span>
+        {delta !== undefined ? (
+          <DeltaPill delta={delta} invert={deltaInvert} />
+        ) : null}
       </div>
       {hint ? (
         <div className="relative mt-1 text-xs text-muted">{hint}</div>

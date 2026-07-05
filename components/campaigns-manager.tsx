@@ -57,7 +57,7 @@ export function CampaignsManager({
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted">
           Salve template + variáveis uma vez e reuse no disparo, sem redigitar.
         </p>
@@ -69,7 +69,7 @@ export function CampaignsManager({
               ? "Nova campanha"
               : "Este agente não tem número de WhatsApp oficial"
           }
-          className="brand-gradient inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="brand-gradient inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           <Plus className="size-4" />
           Nova campanha
