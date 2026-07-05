@@ -321,21 +321,30 @@ export type FormLead = {
   field_data: LeadField[] | null;
   conversou: boolean;
   session_id: string | null;
+  templateEnviado: boolean;
+  ultimoTemplate: string | null;
+  enviadoEm: string | null;
 };
 
 /**
  * Lê os leads de formulário (public.meta_leads, já escopada por cliente no
  * backend) e cruza com as conversas do agente por telefone (dígitos exatos ou
  * sufixo dos últimos 8) para marcar quem já iniciou conversa no WhatsApp.
+ * Também marca quem já recebeu disparo de template (public.outreach_sent).
  * Best-effort: qualquer erro retorna [].
  */
 export async function getFormLeads(slug: string): Promise<FormLead[]> {
   const schema = safeSchema(slug);
   try {
     const rows = await sql.unsafe<
-      (Omit<FormLead, "conversou" | "session_id"> & {
-        conv_session_id: string | null;
-      })[]
+      (Omit<
+        FormLead,
+        | "conversou"
+        | "session_id"
+        | "templateEnviado"
+        | "ultimoTemplate"
+        | "enviadoEm"
+      > & { conv_session_id: string | null })[]
     >(
       `select l.lead_id, l.created_time, l.page_name, l.form_name,
               l.campaign_name, l.adset_name, l.ad_name, l.platform,
@@ -358,13 +367,46 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
        ) conv on true
        order by l.created_time desc nulls last`,
     );
-    return rows.map(({ conv_session_id, ...rest }) => ({
-      ...rest,
-      conversou: conv_session_id != null,
-      session_id: conv_session_id,
-    }));
+
+    const outreach = await getOutreachMap(slug);
+
+    return rows.map(({ conv_session_id, ...rest }) => {
+      const o = rest.phone_norm ? outreach[rest.phone_norm] : undefined;
+      return {
+        ...rest,
+        conversou: conv_session_id != null,
+        session_id: conv_session_id,
+        templateEnviado: !!o,
+        ultimoTemplate: o?.template ?? null,
+        enviadoEm: o?.sentAt ?? null,
+      };
+    });
   } catch {
     return [];
+  }
+}
+
+/** Mapa phone_norm → último template disparado (public.outreach_sent). */
+async function getOutreachMap(
+  slug: string,
+): Promise<Record<string, { template: string | null; sentAt: string | null }>> {
+  try {
+    const rows = await sql.unsafe<
+      { phone_norm: string | null; template_name: string | null; sent_at: string | null }[]
+    >(
+      `select distinct on (phone_norm) phone_norm, template_name, sent_at
+       from public.outreach_sent
+       where agent_slug = $1 and status = 'sent'
+       order by phone_norm, sent_at desc nulls last`,
+      [slug],
+    );
+    const map: Record<string, { template: string | null; sentAt: string | null }> = {};
+    for (const r of rows) {
+      if (r.phone_norm) map[r.phone_norm] = { template: r.template_name, sentAt: r.sent_at };
+    }
+    return map;
+  } catch {
+    return {};
   }
 }
 

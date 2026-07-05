@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { getAgent } from "@/lib/agents";
 import { getFormLeads } from "@/lib/queries";
+import { getApprovedTemplates } from "@/lib/actions";
+import { getMetaConfig } from "@/lib/meta-config";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { LeadList } from "@/components/lead-list";
@@ -20,6 +22,8 @@ export default async function LeadsPage({
 
   const leads = await getFormLeads(slug);
   const converted = leads.filter((l) => l.conversou).length;
+  const sendEnabled = !!getMetaConfig(slug);
+  const templates = sendEnabled ? await getApprovedTemplates(slug) : [];
 
   return (
     <PageWrapper>
@@ -37,7 +41,12 @@ export default async function LeadsPage({
       {leads.length === 0 ? (
         <EmptyLeads />
       ) : (
-        <LeadList slug={slug} leads={leads} />
+        <LeadList
+          slug={slug}
+          leads={leads}
+          templates={templates}
+          sendEnabled={sendEnabled}
+        />
       )}
     </PageWrapper>
   );

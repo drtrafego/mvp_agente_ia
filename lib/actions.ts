@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { sql } from "./db";
 import { getAgent } from "./agents";
 import { getMetaConfig } from "./meta-config";
 import {
@@ -186,5 +187,142 @@ export async function getApprovedTemplates(
     return await listApprovedTemplates(cfg.wabaId);
   } catch {
     return [];
+  }
+}
+
+// ---- Disparo de template em massa (outreach) ------------------------
+
+export type OutreachTarget = { phone: string; name: string };
+export type OutreachResult = {
+  phone: string;
+  name: string;
+  ok: boolean;
+  error?: string;
+};
+export type OutreachSummary = {
+  ok: boolean;
+  enviados: number;
+  falhas: number;
+  resultados: OutreachResult[];
+  error?: string;
+};
+
+async function ensureOutreachTable(): Promise<void> {
+  await sql.unsafe(
+    `create table if not exists public.outreach_sent (
+       id text primary key,
+       agent_slug text,
+       phone_norm text,
+       lead_name text,
+       template_name text,
+       sent_at timestamptz default now(),
+       status text,
+       message_id text,
+       error text
+     )`,
+  );
+  await sql.unsafe(
+    `create index if not exists outreach_sent_agent_phone_idx
+       on public.outreach_sent (agent_slug, phone_norm)`,
+  );
+}
+
+/**
+ * Dispara um template aprovado para uma lista de leads (1º toque em quem
+ * preencheu o form mas não conversou). Envio direto pela Meta, com delay entre
+ * mensagens; grava cada resultado em public.outreach_sent. Nunca lança 500.
+ */
+export async function sendTemplateToLeads(
+  slug: string,
+  targets: OutreachTarget[],
+  templateName: string,
+  lang: string,
+  params: string[] = [],
+): Promise<OutreachSummary> {
+  const fail = (error: string): OutreachSummary => ({
+    ok: false,
+    enviados: 0,
+    falhas: 0,
+    resultados: [],
+    error,
+  });
+  try {
+    if (!getAgent(slug)) return fail("Agente desconhecido.");
+    const cfg = getMetaConfig(slug);
+    if (!cfg)
+      return fail("Este agente não tem número de WhatsApp oficial configurado.");
+    if (!templateName) return fail("Selecione um template.");
+    if (!Array.isArray(targets) || targets.length === 0)
+      return fail("Nenhum lead selecionado.");
+
+    try {
+      await ensureOutreachTable();
+    } catch {
+      // se não der pra criar a tabela, segue o envio mesmo sem rastreio
+    }
+
+    const clean = params.map((p) => p.trim()).filter(Boolean);
+    const resultados: OutreachResult[] = [];
+    let enviados = 0;
+    let falhas = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+      const t = targets[i];
+      const name = t?.name ?? "";
+      const phone = (t?.phone ?? "").replace(/\D/g, "");
+      if (!phone) {
+        falhas++;
+        resultados.push({ phone: t?.phone ?? "", name, ok: false, error: "Telefone inválido." });
+        continue;
+      }
+
+      const r = await sendWhatsappTemplate(
+        phone,
+        templateName,
+        lang || "pt_BR",
+        clean,
+        cfg.phoneNumberId,
+      );
+
+      const id = `${slug}:${phone}:${Date.now()}:${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      try {
+        await sql.unsafe(
+          `insert into public.outreach_sent
+             (id, agent_slug, phone_norm, lead_name, template_name, status, message_id, error)
+           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            id,
+            slug,
+            phone,
+            name || null,
+            templateName,
+            r.ok ? "sent" : "failed",
+            r.messageId || null,
+            r.ok ? null : r.error ?? null,
+          ],
+        );
+      } catch {
+        // rastreio é best-effort; não interrompe o disparo
+      }
+
+      if (r.ok) {
+        enviados++;
+        resultados.push({ phone, name, ok: true });
+      } else {
+        falhas++;
+        resultados.push({ phone, name, ok: false, error: r.error });
+      }
+
+      if (i < targets.length - 1) {
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+    }
+
+    revalidatePath(`/${slug}/leads`);
+    return { ok: true, enviados, falhas, resultados };
+  } catch {
+    return fail("Erro inesperado no disparo.");
   }
 }

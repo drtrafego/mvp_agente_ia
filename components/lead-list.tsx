@@ -11,13 +11,25 @@ import {
   Image as ImageIcon,
   Radio,
   User,
+  Users,
   MessageCircle,
   ArrowRight,
   Clock,
   CheckCircle2,
   ClipboardList,
+  Rocket,
+  Send,
+  LayoutTemplate,
+  Loader2,
+  AlertTriangle,
+  TriangleAlert,
 } from "lucide-react";
 import type { FormLead } from "@/lib/queries";
+import {
+  sendTemplateToLeads,
+  type ApprovedTemplate,
+  type OutreachSummary,
+} from "@/lib/actions";
 import { Badge } from "./ui";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
@@ -61,85 +73,464 @@ function fieldLabel(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function LeadList({ slug, leads }: { slug: string; leads: FormLead[] }) {
-  const [selected, setSelected] = React.useState<FormLead | null>(null);
+export function LeadList({
+  slug,
+  leads,
+  templates,
+  sendEnabled,
+}: {
+  slug: string;
+  leads: FormLead[];
+  templates: ApprovedTemplate[];
+  sendEnabled: boolean;
+}) {
+  const [detail, setDetail] = React.useState<FormLead | null>(null);
+  const [sel, setSel] = React.useState<Set<string>>(new Set());
+  const [campaignOpen, setCampaignOpen] = React.useState(false);
+
+  const aguardando = React.useMemo(
+    () => leads.filter((l) => !l.conversou && l.phone_norm),
+    [leads],
+  );
+  const allAguardandoSelected =
+    aguardando.length > 0 && aguardando.every((l) => sel.has(l.phone_norm!));
+
+  function toggle(id: string) {
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllAguardando() {
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (allAguardandoSelected) {
+        aguardando.forEach((l) => next.delete(l.phone_norm!));
+      } else {
+        aguardando.forEach((l) => next.add(l.phone_norm!));
+      }
+      return next;
+    });
+  }
+
+  const targets = React.useMemo(
+    () =>
+      leads
+        .filter((l) => l.phone_norm && sel.has(l.phone_norm))
+        .map((l) => ({ phone: l.phone_norm as string, name: l.full_name ?? "" })),
+    [leads, sel],
+  );
 
   return (
     <>
+      {/* Toolbar de disparo */}
+      {sel.size > 0 ? (
+        <div className="animate-fade-up mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-secondary/30 bg-gradient-to-r from-secondary/10 to-accent-2/10 px-4 py-2.5">
+          <span className="flex items-center gap-2 text-sm">
+            <Users className="size-4 text-secondary" />
+            <span className="font-medium">{sel.size}</span> selecionado
+            {sel.size > 1 ? "s" : ""}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSel(new Set())}
+              className="rounded-lg px-3 py-1.5 text-xs text-muted transition-colors hover:text-fg"
+            >
+              Limpar
+            </button>
+            <button
+              onClick={() => setCampaignOpen(true)}
+              disabled={!sendEnabled}
+              title={
+                sendEnabled
+                  ? "Disparar template"
+                  : "Este agente não tem número de WhatsApp oficial"
+              }
+              className="brand-gradient inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Rocket className="size-4" />
+              Disparar template
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {!sendEnabled ? (
+        <p className="mb-3 flex items-center gap-1.5 rounded-lg border border-border bg-surface-2/60 px-3 py-2 text-xs text-muted-2">
+          <TriangleAlert className="size-3.5 shrink-0 text-accent" />
+          Este agente não tem número de WhatsApp oficial: o disparo de template
+          está indisponível.
+        </p>
+      ) : null}
+
       <div className="animate-fade-up overflow-hidden rounded-2xl border border-border glass shadow-soft">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-2">
+                <th className="w-10 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    aria-label="Selecionar todos os Aguardando"
+                    checked={allAguardandoSelected}
+                    onChange={toggleAllAguardando}
+                    disabled={aguardando.length === 0}
+                    className="size-4 accent-[#8b5cf6]"
+                  />
+                </th>
                 <th className="px-4 py-3 font-medium">Nome</th>
                 <th className="px-4 py-3 font-medium">Telefone</th>
                 <th className="hidden px-4 py-3 font-medium md:table-cell">
                   Campanha
                 </th>
-                <th className="hidden px-4 py-3 font-medium lg:table-cell">
+                <th className="hidden px-4 py-3 font-medium xl:table-cell">
                   Anúncio
                 </th>
-                <th className="px-4 py-3 font-medium">Data</th>
+                <th className="hidden px-4 py-3 font-medium lg:table-cell">
+                  Data
+                </th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="hidden px-4 py-3 font-medium sm:table-cell">
+                  Disparo
+                </th>
               </tr>
             </thead>
             <tbody>
-              {leads.map((lead, i) => (
-                <tr
-                  key={lead.lead_id ?? `${lead.phone_norm}-${i}`}
-                  onClick={() => setSelected(lead)}
-                  className="cursor-pointer border-b border-border/60 transition-colors last:border-0 hover:bg-surface-2"
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-2/15 text-[#c4b5fd]">
-                        <User className="size-3.5" />
-                      </span>
-                      <span className="truncate font-medium">
-                        {lead.full_name ?? "Sem nome"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="tnum px-4 py-3 text-muted">
-                    {lead.phone ?? "—"}
-                  </td>
-                  <td className="hidden max-w-[200px] truncate px-4 py-3 text-muted md:table-cell">
-                    {lead.campaign_name ?? "—"}
-                  </td>
-                  <td className="hidden max-w-[200px] truncate px-4 py-3 text-muted lg:table-cell">
-                    {lead.ad_name ?? "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted">
-                    {lead.created_time ? formatDate(lead.created_time) : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    {lead.conversou ? (
-                      <Badge tone="success">
-                        <CheckCircle2 className="size-3" />
-                        Conversou
-                      </Badge>
-                    ) : (
-                      <Badge tone="accent">
-                        <Clock className="size-3" />
-                        Aguardando
-                      </Badge>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {leads.map((lead, i) => {
+                const id = lead.phone_norm;
+                const checked = id ? sel.has(id) : false;
+                return (
+                  <tr
+                    key={lead.lead_id ?? `${lead.phone_norm}-${i}`}
+                    onClick={() => setDetail(lead)}
+                    className={`cursor-pointer border-b border-border/60 transition-colors last:border-0 hover:bg-surface-2 ${
+                      checked ? "bg-secondary/10" : ""
+                    }`}
+                  >
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        aria-label={`Selecionar ${lead.full_name ?? "lead"}`}
+                        checked={checked}
+                        disabled={!id}
+                        onChange={() => id && toggle(id)}
+                        className="size-4 accent-[#8b5cf6] disabled:opacity-30"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-2/15 text-[#c4b5fd]">
+                          <User className="size-3.5" />
+                        </span>
+                        <span className="truncate font-medium">
+                          {lead.full_name ?? "Sem nome"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="tnum px-4 py-3 text-muted">
+                      {lead.phone ?? "—"}
+                    </td>
+                    <td className="hidden max-w-[200px] truncate px-4 py-3 text-muted md:table-cell">
+                      {lead.campaign_name ?? "—"}
+                    </td>
+                    <td className="hidden max-w-[200px] truncate px-4 py-3 text-muted xl:table-cell">
+                      {lead.ad_name ?? "—"}
+                    </td>
+                    <td className="hidden whitespace-nowrap px-4 py-3 text-muted lg:table-cell">
+                      {lead.created_time ? formatDate(lead.created_time) : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {lead.conversou ? (
+                        <Badge tone="success">
+                          <CheckCircle2 className="size-3" />
+                          Conversou
+                        </Badge>
+                      ) : (
+                        <Badge tone="accent">
+                          <Clock className="size-3" />
+                          Aguardando
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="hidden px-4 py-3 sm:table-cell">
+                      {lead.templateEnviado ? (
+                        <Badge
+                          tone="violet"
+                          title={
+                            lead.ultimoTemplate
+                              ? `${lead.ultimoTemplate}${
+                                  lead.enviadoEm
+                                    ? ` · ${formatDate(lead.enviadoEm)}`
+                                    : ""
+                                }`
+                              : undefined
+                          }
+                        >
+                          <Send className="size-3" />
+                          {lead.enviadoEm ? formatDate(lead.enviadoEm) : "Enviado"}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-2">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
-      {selected ? (
-        <LeadModal
+      {detail ? (
+        <LeadModal slug={slug} lead={detail} onClose={() => setDetail(null)} />
+      ) : null}
+
+      {campaignOpen ? (
+        <CampaignModal
           slug={slug}
-          lead={selected}
-          onClose={() => setSelected(null)}
+          templates={templates}
+          targets={targets}
+          onClose={() => setCampaignOpen(false)}
+          onDone={() => {
+            setCampaignOpen(false);
+            setSel(new Set());
+          }}
         />
       ) : null}
     </>
+  );
+}
+
+function CampaignModal({
+  slug,
+  templates,
+  targets,
+  onClose,
+  onDone,
+}: {
+  slug: string;
+  templates: ApprovedTemplate[];
+  targets: { phone: string; name: string }[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
+  const [vars, setVars] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<OutreachSummary | null>(null);
+
+  const tpl = templates.find((t) => t.name === tplName) ?? null;
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !sending) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose, sending]);
+
+  async function confirmar() {
+    if (!tpl || sending) return;
+    setSending(true);
+    setError(null);
+    const params = vars
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const res = await sendTemplateToLeads(
+      slug,
+      targets,
+      tpl.name,
+      tpl.language,
+      params,
+    );
+    setSending(false);
+    if (!res.ok) {
+      setError(res.error ?? "Não foi possível disparar.");
+      return;
+    }
+    setResult(res);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
+        onClick={() => (sending ? null : onClose())}
+      />
+      <div className="relative flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:rounded-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
+              <Rocket className="size-5" />
+            </span>
+            <div>
+              <h2 className="text-base font-semibold">Disparar template</h2>
+              <p className="text-xs text-muted">
+                {targets.length} lead{targets.length > 1 ? "s" : ""} selecionado
+                {targets.length > 1 ? "s" : ""}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => (sending ? null : onClose())}
+            aria-label="Fechar"
+            disabled={sending}
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-2 transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-40"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+          {result ? (
+            <ResultView result={result} />
+          ) : (
+            <>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted">
+                  Template aprovado
+                </label>
+                {templates.length === 0 ? (
+                  <p className="rounded-lg border border-border bg-surface-2/60 px-3 py-2.5 text-xs text-muted-2">
+                    Nenhum template aprovado disponível para este agente.
+                  </p>
+                ) : (
+                  <div className="relative">
+                    <LayoutTemplate className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
+                    <select
+                      value={tplName}
+                      onChange={(e) => setTplName(e.target.value)}
+                      className="w-full appearance-none rounded-lg border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm text-fg outline-none focus:border-secondary/50"
+                    >
+                      {templates.map((t) => (
+                        <option key={`${t.name}-${t.language}`} value={t.name}>
+                          {t.name} ({t.language})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted">
+                  Variáveis {"{{1}}, {{2}}"} — separadas por vírgula (opcional)
+                </label>
+                <input
+                  value={vars}
+                  onChange={(e) => setVars(e.target.value)}
+                  placeholder="ex.: João, 10% OFF"
+                  className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
+                />
+              </div>
+
+              <div className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2.5 text-xs text-accent">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  Isso envia uma mensagem real de WhatsApp para{" "}
+                  <strong>{targets.length}</strong> pessoa
+                  {targets.length > 1 ? "s" : ""}. Verifique o template antes de
+                  confirmar.
+                </span>
+              </div>
+
+              {error ? (
+                <p className="flex items-center gap-1.5 text-xs text-[#f87171]">
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  {error}
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        <div className="border-t border-border p-4">
+          {result ? (
+            <button
+              onClick={onDone}
+              className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white transition-all hover:brightness-110"
+            >
+              Concluir
+            </button>
+          ) : (
+            <button
+              onClick={confirmar}
+              disabled={sending || !tpl || targets.length === 0}
+              className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Enviando… (pode levar alguns segundos)
+                </>
+              ) : (
+                <>
+                  <Send className="size-4" />
+                  Confirmar disparo
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultView({ result }: { result: OutreachSummary }) {
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-success/30 bg-success/10 p-3 text-center">
+          <div className="tnum text-2xl font-semibold text-[#4ade80]">
+            {result.enviados}
+          </div>
+          <div className="text-xs text-muted">enviados</div>
+        </div>
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-center">
+          <div className="tnum text-2xl font-semibold text-[#f87171]">
+            {result.falhas}
+          </div>
+          <div className="text-xs text-muted">falhas</div>
+        </div>
+      </div>
+      {result.falhas > 0 ? (
+        <div className="max-h-40 space-y-1 overflow-y-auto">
+          {result.resultados
+            .filter((r) => !r.ok)
+            .map((r, i) => (
+              <p
+                key={`${r.phone}-${i}`}
+                className="flex items-start gap-1.5 text-[11px] text-muted-2"
+              >
+                <AlertTriangle className="mt-0.5 size-3 shrink-0 text-[#f87171]" />
+                <span className="tnum">{r.phone}</span>
+                <span className="truncate">{r.error ?? "falhou"}</span>
+              </p>
+            ))}
+        </div>
+      ) : (
+        <p className="text-center text-xs text-muted">
+          Todos os templates foram enviados com sucesso.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -277,6 +668,16 @@ function LeadModal({
                   </div>
                 ))}
               </dl>
+            </div>
+          ) : null}
+
+          {/* Disparo de template */}
+          {lead.templateEnviado ? (
+            <div className="flex items-center gap-1.5 text-xs text-[#c4b5fd]">
+              <Send className="size-3.5" />
+              Template {lead.ultimoTemplate ? `"${lead.ultimoTemplate}" ` : ""}
+              enviado
+              {lead.enviadoEm ? ` em ${formatDateTime(lead.enviadoEm)}` : ""}
             </div>
           ) : null}
 
