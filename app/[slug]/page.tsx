@@ -7,6 +7,7 @@ import {
   TrendingUp,
   Radio,
 } from "lucide-react";
+import { notFound } from "next/navigation";
 import { getAgent } from "@/lib/agents";
 import { getOverview } from "@/lib/queries";
 import { formatUSD, formatNumber, formatCompact } from "@/lib/utils";
@@ -25,6 +26,7 @@ export default async function OverviewPage({
 }) {
   const { slug } = await params;
   const agent = getAgent(slug);
+  if (!agent) notFound();
 
   return (
     <PageWrapper>

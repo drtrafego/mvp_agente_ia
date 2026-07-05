@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   MessagesSquare,
+  Users,
   KanbanSquare,
   Sparkles,
   ChevronLeft,
@@ -29,6 +30,11 @@ function buildNav(slug: string): NavItem[] {
       href: `/${slug}/conversas`,
       label: "Conversas",
       icon: <MessagesSquare className="size-[18px]" />,
+    },
+    {
+      href: `/${slug}/leads`,
+      label: "Leads",
+      icon: <Users className="size-[18px]" />,
     },
     {
       href: `/${slug}/pipeline`,

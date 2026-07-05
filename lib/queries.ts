@@ -303,6 +303,71 @@ async function getCtwaLead(
   }
 }
 
+// Leads de formulário (Meta Lead Ads) --------------------------------
+
+export type FormLead = {
+  lead_id: string | null;
+  created_time: string | null;
+  page_name: string | null;
+  form_name: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  ad_name: string | null;
+  platform: string | null;
+  full_name: string | null;
+  phone: string | null;
+  phone_norm: string | null;
+  email: string | null;
+  field_data: LeadField[] | null;
+  conversou: boolean;
+  session_id: string | null;
+};
+
+/**
+ * Lê os leads de formulário (public.meta_leads, já escopada por cliente no
+ * backend) e cruza com as conversas do agente por telefone (dígitos exatos ou
+ * sufixo dos últimos 8) para marcar quem já iniciou conversa no WhatsApp.
+ * Best-effort: qualquer erro retorna [].
+ */
+export async function getFormLeads(slug: string): Promise<FormLead[]> {
+  const schema = safeSchema(slug);
+  try {
+    const rows = await sql.unsafe<
+      (Omit<FormLead, "conversou" | "session_id"> & {
+        conv_session_id: string | null;
+      })[]
+    >(
+      `select l.lead_id, l.created_time, l.page_name, l.form_name,
+              l.campaign_name, l.adset_name, l.ad_name, l.platform,
+              l.full_name, l.phone, l.phone_norm, l.email, l.field_data,
+              conv.session_id as conv_session_id
+       from public.meta_leads l
+       left join lateral (
+         select c.session_id
+         from "${schema}".conversations c
+         where l.phone_norm is not null and l.phone_norm <> '' and (
+           regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+           or (
+             length(l.phone_norm) >= 8
+             and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                 = right(l.phone_norm, 8)
+           )
+         )
+         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         limit 1
+       ) conv on true
+       order by l.created_time desc nulls last`,
+    );
+    return rows.map(({ conv_session_id, ...rest }) => ({
+      ...rest,
+      conversou: conv_session_id != null,
+      session_id: conv_session_id,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 // Pipeline -------------------------------------------------------------
 
 export const STAGES = ["Novo", "Em conversa", "Agendado", "Perdido"] as const;
