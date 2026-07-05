@@ -13,7 +13,28 @@ export type ApprovedTemplate = {
   name: string;
   language: string;
   category: string;
+  /** Texto do corpo (componente BODY), com placeholders {{n}}. */
+  body: string;
+  /** Quantidade de variáveis {{n}} no corpo (maior n encontrado). */
+  varCount: number;
 };
+
+type TemplateComponent = {
+  type?: string;
+  text?: string;
+};
+
+/** Conta variáveis {{n}} pegando o maior índice presente no texto. */
+function countVars(text: string): number {
+  let max = 0;
+  const re = /\{\{\s*(\d+)\s*\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
 
 const GRAPH = "https://graph.facebook.com";
 
@@ -144,7 +165,7 @@ export async function listApprovedTemplates(
 ): Promise<ApprovedTemplate[]> {
   const t = token();
   if (!t || !wabaId) return [];
-  const url = `${GRAPH}/${META_GRAPH_VERSION}/${wabaId}/message_templates?fields=name,status,language,category&limit=200`;
+  const url = `${GRAPH}/${META_GRAPH_VERSION}/${wabaId}/message_templates?fields=name,status,language,category,components&limit=200`;
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${t}` },
@@ -157,16 +178,25 @@ export async function listApprovedTemplates(
         status?: string;
         language?: string;
         category?: string;
+        components?: TemplateComponent[];
       }>;
     };
     const list = Array.isArray(data.data) ? data.data : [];
     return list
       .filter((tpl) => tpl.status === "APPROVED" && tpl.name)
-      .map((tpl) => ({
-        name: tpl.name as string,
-        language: tpl.language ?? "pt_BR",
-        category: tpl.category ?? "",
-      }));
+      .map((tpl) => {
+        const bodyComp = (tpl.components ?? []).find(
+          (c) => (c.type ?? "").toUpperCase() === "BODY",
+        );
+        const body = bodyComp?.text ?? "";
+        return {
+          name: tpl.name as string,
+          language: tpl.language ?? "pt_BR",
+          category: tpl.category ?? "",
+          body,
+          varCount: countVars(body),
+        };
+      });
   } catch {
     return [];
   }

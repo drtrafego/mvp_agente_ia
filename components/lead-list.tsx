@@ -307,6 +307,19 @@ export function LeadList({
   );
 }
 
+function fillPreview(
+  body: string,
+  leadName: string,
+  sharedParams: string[],
+): string {
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, num: string) => {
+    const n = Number(num);
+    if (n === 1) return leadName || "{{1}}";
+    const v = sharedParams[n - 2];
+    return v && v.trim() ? v : `{{${n}}}`;
+  });
+}
+
 function CampaignModal({
   slug,
   templates,
@@ -321,12 +334,21 @@ function CampaignModal({
   onDone: () => void;
 }) {
   const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
-  const [vars, setVars] = React.useState("");
+  const [shared, setShared] = React.useState<string[]>([]);
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<OutreachSummary | null>(null);
 
   const tpl = templates.find((t) => t.name === tplName) ?? null;
+  const varCount = tpl?.varCount ?? 0;
+  // {{1}} = nome (automático). Campos do usuário: {{2}}..{{varCount}}.
+  const sharedNeeded = Math.max(0, varCount - 1);
+
+  // reseta os campos compartilhados ao trocar de template.
+  React.useEffect(() => {
+    setShared(Array(sharedNeeded).fill(""));
+    setError(null);
+  }, [tplName, sharedNeeded]);
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -340,20 +362,25 @@ function CampaignModal({
     };
   }, [onClose, sending]);
 
+  const missing =
+    sharedNeeded > 0 && shared.slice(0, sharedNeeded).some((v) => !v.trim());
+  const firstName = targets[0]?.name?.trim() || "cliente";
+
   async function confirmar() {
     if (!tpl || sending) return;
+    if (missing) {
+      setError("Preencha todas as variáveis compartilhadas antes de disparar.");
+      return;
+    }
     setSending(true);
     setError(null);
-    const params = vars
-      .split(",")
-      .map((v) => v.trim())
-      .filter(Boolean);
     const res = await sendTemplateToLeads(
       slug,
       targets,
       tpl.name,
       tpl.language,
-      params,
+      shared.slice(0, sharedNeeded),
+      varCount,
     );
     setSending(false);
     if (!res.ok) {
@@ -428,17 +455,68 @@ function CampaignModal({
                 )}
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted">
-                  Variáveis {"{{1}}, {{2}}"} — separadas por vírgula (opcional)
-                </label>
-                <input
-                  value={vars}
-                  onChange={(e) => setVars(e.target.value)}
-                  placeholder="ex.: João, 10% OFF"
-                  className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
-                />
-              </div>
+              {/* Preview do corpo do template */}
+              {tpl && tpl.body ? (
+                <div>
+                  <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-2">
+                    Corpo do template
+                  </p>
+                  <p className="whitespace-pre-wrap rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-sm text-muted">
+                    {tpl.body}
+                  </p>
+                </div>
+              ) : null}
+
+              {/* {{1}} = nome (automático) */}
+              {varCount >= 1 ? (
+                <div className="flex items-center gap-1.5 rounded-lg border border-accent-2/30 bg-accent-2/10 px-3 py-2 text-xs text-[#c4b5fd]">
+                  <User className="size-3.5 shrink-0" />
+                  <span>
+                    <strong>{"{{1}}"}</strong> = nome do lead (preenchido
+                    automaticamente por pessoa)
+                  </span>
+                </div>
+              ) : null}
+
+              {/* Campos das variáveis compartilhadas {{2}}..{{n}} */}
+              {sharedNeeded > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] uppercase tracking-wide text-muted-2">
+                    Variáveis compartilhadas (valem para todos)
+                  </p>
+                  {Array.from({ length: sharedNeeded }).map((_, idx) => (
+                    <div key={idx}>
+                      <label className="mb-1 block text-xs font-medium text-muted">
+                        Variável {idx + 2} {`{{${idx + 2}}}`}
+                      </label>
+                      <input
+                        value={shared[idx] ?? ""}
+                        onChange={(e) =>
+                          setShared((prev) => {
+                            const next = [...prev];
+                            next[idx] = e.target.value;
+                            return next;
+                          })
+                        }
+                        placeholder={`Conteúdo da variável ${idx + 2}`}
+                        className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
+                      />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Preview de exemplo (primeiro lead) */}
+              {tpl && tpl.body && varCount >= 1 ? (
+                <div>
+                  <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-2">
+                    Prévia para {firstName}
+                  </p>
+                  <p className="whitespace-pre-wrap rounded-lg border border-secondary/25 bg-gradient-to-br from-secondary/15 to-accent-2/10 px-3 py-2.5 text-sm text-fg">
+                    {fillPreview(tpl.body, firstName, shared)}
+                  </p>
+                </div>
+              ) : null}
 
               <div className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2.5 text-xs text-accent">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" />
@@ -471,7 +549,7 @@ function CampaignModal({
           ) : (
             <button
               onClick={confirmar}
-              disabled={sending || !tpl || targets.length === 0}
+              disabled={sending || !tpl || targets.length === 0 || missing}
               className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sending ? (

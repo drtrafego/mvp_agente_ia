@@ -237,7 +237,8 @@ export async function sendTemplateToLeads(
   targets: OutreachTarget[],
   templateName: string,
   lang: string,
-  params: string[] = [],
+  sharedParams: string[] = [],
+  varCount = 0,
 ): Promise<OutreachSummary> {
   const fail = (error: string): OutreachSummary => ({
     ok: false,
@@ -255,13 +256,21 @@ export async function sendTemplateToLeads(
     if (!Array.isArray(targets) || targets.length === 0)
       return fail("Nenhum lead selecionado.");
 
+    // {{1}} = nome do lead (por lead); {{2}}..{{n}} = compartilhados.
+    const shared = sharedParams.map((p) => p.trim());
+    if (varCount > 1 && shared.length < varCount - 1) {
+      return fail(
+        `Preencha as ${varCount - 1} variáveis compartilhadas do template.`,
+      );
+    }
+    const sharedForTemplate = varCount > 1 ? shared.slice(0, varCount - 1) : [];
+
     try {
       await ensureOutreachTable();
     } catch {
       // se não der pra criar a tabela, segue o envio mesmo sem rastreio
     }
 
-    const clean = params.map((p) => p.trim()).filter(Boolean);
     const resultados: OutreachResult[] = [];
     let enviados = 0;
     let falhas = 0;
@@ -276,11 +285,17 @@ export async function sendTemplateToLeads(
         continue;
       }
 
+      // Monta bodyParams por lead: [nome, ...compartilhados]. Sem variáveis → [].
+      const bodyParams =
+        varCount === 0
+          ? []
+          : [name.trim() || "tudo bem", ...sharedForTemplate];
+
       const r = await sendWhatsappTemplate(
         phone,
         templateName,
         lang || "pt_BR",
-        clean,
+        bodyParams,
         cfg.phoneNumberId,
       );
 
