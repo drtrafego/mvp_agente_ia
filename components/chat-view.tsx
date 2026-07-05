@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, Bot, User, DollarSign } from "lucide-react";
 import type { ConversationRow, MessageRow } from "@/lib/queries";
+import type { ApprovedTemplate } from "@/lib/actions";
 import { Badge } from "./ui";
 import { ChannelIcon } from "./channel-icon";
 import { ChatControls } from "./chat-controls";
@@ -12,11 +13,15 @@ export function ChatView({
   conversation,
   messages,
   isPaused,
+  sendEnabled,
+  templates,
 }: {
   slug: string;
   conversation: ConversationRow;
   messages: MessageRow[];
   isPaused: boolean;
+  sendEnabled: boolean;
+  templates: ApprovedTemplate[];
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
@@ -68,6 +73,8 @@ export function ChatView({
         chatId={conversation.chat_id}
         isPaused={isPaused}
         messageCount={messages.length}
+        sendEnabled={sendEnabled}
+        templates={templates}
       />
     </div>
   );

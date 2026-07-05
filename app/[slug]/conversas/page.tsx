@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui";
 import { ChannelIcon } from "@/components/channel-icon";
 import { ChatView } from "@/components/chat-view";
 import { LeadCard } from "@/components/lead-card";
-import { getPausedChatIds } from "@/lib/actions";
+import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
+import { getMetaConfig } from "@/lib/meta-config";
 import { cn } from "@/lib/utils";
 import { channelLabel, formatNumber, timeAgo } from "@/lib/utils";
 
@@ -34,6 +35,9 @@ export default async function ConversasPage({
     ? paused.includes(selected.chat_id)
     : false;
   const lead = selected ? await getLeadForConversation(selected) : null;
+  const sendEnabled = !!getMetaConfig(slug);
+  const templates =
+    selected && sendEnabled ? await getApprovedTemplates(slug) : [];
 
   return (
     <div className="animate-fade-in flex h-[calc(100dvh-3.5rem)] flex-col gap-3 p-3 sm:p-4 lg:h-dvh">
@@ -121,6 +125,8 @@ export default async function ConversasPage({
                   conversation={selected}
                   messages={messages}
                   isPaused={isPaused}
+                  sendEnabled={sendEnabled}
+                  templates={templates}
                 />
               </div>
             </>
