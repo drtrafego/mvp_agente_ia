@@ -391,8 +391,11 @@ function PlatformSection({ d }: { d: DashboardData }) {
       />
       <div className="mt-4">
         <CategoryDonut
-          data={d.byPlatform.map((x) => ({ key: x.platform, value: x.value }))}
-          labelFn={platformLabel}
+          data={d.byPlatform.map((x) => ({
+            key: x.platform,
+            value: x.value,
+            label: platformLabel(x.platform),
+          }))}
         />
       </div>
     </Card>

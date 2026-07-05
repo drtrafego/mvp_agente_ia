@@ -361,11 +361,9 @@ const CAT_COLORS = ["#3b82f6", "#8b5cf6", "#d97706", "#16a34a", "#ec4899", "#14b
 
 export function CategoryDonut({
   data,
-  labelFn,
   unit = "leads",
 }: {
-  data: { key: string; value: number }[];
-  labelFn: (k: string) => string;
+  data: { key: string; value: number; label: string }[];
   unit?: string;
 }) {
   if (!data.length) return <Empty />;
@@ -392,7 +390,7 @@ export function CategoryDonut({
               content={({ active, payload }) =>
                 active && payload?.length ? (
                   <TooltipBox
-                    title={labelFn(String(payload[0].payload.key))}
+                    title={String(payload[0].payload.label ?? payload[0].payload.key)}
                     rows={[
                       {
                         label: unit,
@@ -421,7 +419,7 @@ export function CategoryDonut({
                 className="inline-block size-2.5 rounded-sm"
                 style={{ background: CAT_COLORS[i % CAT_COLORS.length] }}
               />
-              {labelFn(d.key)}
+              {d.label}
             </span>
             <span className="tnum font-medium">
               {d.value}
