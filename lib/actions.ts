@@ -341,3 +341,184 @@ export async function sendTemplateToLeads(
     return fail("Erro inesperado no disparo.");
   }
 }
+
+// ---- Campanhas salvas (reuso de template + variáveis) ---------------
+
+export type Campaign = {
+  id: string;
+  name: string;
+  templateName: string;
+  templateLang: string;
+  vars: string[];
+  body: string;
+  createdAt: string | null;
+};
+
+async function ensureCampaignsTable(): Promise<void> {
+  await sql.unsafe(
+    `create table if not exists public.campaigns (
+       id text primary key,
+       agent_slug text,
+       name text,
+       template_name text,
+       template_lang text,
+       template_vars jsonb,
+       template_body text,
+       created_at timestamptz default now(),
+       active boolean default true
+     )`,
+  );
+  await sql.unsafe(
+    `create index if not exists campaigns_agent_idx on public.campaigns (agent_slug)`,
+  );
+}
+
+export async function createCampaign(
+  slug: string,
+  data: {
+    name: string;
+    templateName: string;
+    lang: string;
+    vars: string[];
+    body: string;
+  },
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    const name = data.name?.trim();
+    if (!name) return { ok: false, error: "Dê um nome à campanha." };
+    if (!data.templateName)
+      return { ok: false, error: "Selecione um template." };
+
+    await ensureCampaignsTable();
+    const id = `${slug}:${Date.now()}:${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const vars = (data.vars ?? []).map((v) => v.trim());
+
+    await sql.unsafe(
+      `insert into public.campaigns
+         (id, agent_slug, name, template_name, template_lang, template_vars, template_body, active)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, true)`,
+      [
+        id,
+        slug,
+        name,
+        data.templateName,
+        data.lang || "pt_BR",
+        JSON.stringify(vars),
+        data.body ?? "",
+      ],
+    );
+    revalidatePath(`/${slug}/campaigns`);
+    return { ok: true, id };
+  } catch {
+    return { ok: false, error: "Erro inesperado ao salvar a campanha." };
+  }
+}
+
+export async function listCampaigns(slug: string): Promise<Campaign[]> {
+  try {
+    if (!getAgent(slug)) return [];
+    const rows = await sql.unsafe<
+      {
+        id: string;
+        name: string | null;
+        template_name: string | null;
+        template_lang: string | null;
+        template_vars: unknown;
+        template_body: string | null;
+        created_at: string | null;
+      }[]
+    >(
+      `select id, name, template_name, template_lang, template_vars,
+              template_body, created_at
+       from public.campaigns
+       where agent_slug = $1 and active = true
+       order by created_at desc nulls last`,
+      [slug],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name ?? "Campanha",
+      templateName: r.template_name ?? "",
+      templateLang: r.template_lang ?? "pt_BR",
+      vars: Array.isArray(r.template_vars)
+        ? (r.template_vars as unknown[]).map((v) => String(v))
+        : [],
+      body: r.template_body ?? "",
+      createdAt: r.created_at,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteCampaign(
+  slug: string,
+  id: string,
+): Promise<ActionResult> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    if (!id) return { ok: false, error: "Campanha inválida." };
+    await sql.unsafe(
+      `update public.campaigns set active = false where id = $1 and agent_slug = $2`,
+      [id, slug],
+    );
+    revalidatePath(`/${slug}/campaigns`);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro inesperado ao excluir a campanha." };
+  }
+}
+
+/** Dispara uma campanha salva reusando a lógica de sendTemplateToLeads. */
+export async function dispatchCampaign(
+  slug: string,
+  campaignId: string,
+  targets: OutreachTarget[],
+): Promise<OutreachSummary> {
+  const fail = (error: string): OutreachSummary => ({
+    ok: false,
+    enviados: 0,
+    falhas: 0,
+    resultados: [],
+    error,
+  });
+  try {
+    if (!getAgent(slug)) return fail("Agente desconhecido.");
+    if (!campaignId) return fail("Campanha inválida.");
+
+    const [row] = await sql.unsafe<
+      {
+        template_name: string | null;
+        template_lang: string | null;
+        template_vars: unknown;
+      }[]
+    >(
+      `select template_name, template_lang, template_vars
+       from public.campaigns
+       where id = $1 and agent_slug = $2 and active = true
+       limit 1`,
+      [campaignId, slug],
+    );
+    if (!row?.template_name) return fail("Campanha não encontrada.");
+
+    const vars = Array.isArray(row.template_vars)
+      ? (row.template_vars as unknown[]).map((v) => String(v))
+      : [];
+    // varCount = 1 (nome) + variáveis compartilhadas salvas.
+    const varCount = 1 + vars.length;
+
+    return await sendTemplateToLeads(
+      slug,
+      targets,
+      row.template_name,
+      row.template_lang ?? "pt_BR",
+      vars,
+      varCount,
+    );
+  } catch {
+    return fail("Erro inesperado no disparo da campanha.");
+  }
+}

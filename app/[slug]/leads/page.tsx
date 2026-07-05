@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { getAgent } from "@/lib/agents";
 import { getFormLeads } from "@/lib/queries";
-import { getApprovedTemplates } from "@/lib/actions";
+import { getApprovedTemplates, listCampaigns } from "@/lib/actions";
 import { getMetaConfig } from "@/lib/meta-config";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
@@ -23,7 +23,10 @@ export default async function LeadsPage({
   const leads = await getFormLeads(slug);
   const converted = leads.filter((l) => l.conversou).length;
   const sendEnabled = !!getMetaConfig(slug);
-  const templates = sendEnabled ? await getApprovedTemplates(slug) : [];
+  const [templates, campaigns] = await Promise.all([
+    sendEnabled ? getApprovedTemplates(slug) : Promise.resolve([]),
+    listCampaigns(slug),
+  ]);
 
   return (
     <PageWrapper>
@@ -45,6 +48,7 @@ export default async function LeadsPage({
           slug={slug}
           leads={leads}
           templates={templates}
+          campaigns={campaigns}
           sendEnabled={sendEnabled}
         />
       )}

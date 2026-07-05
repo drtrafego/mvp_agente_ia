@@ -27,8 +27,10 @@ import {
 import type { FormLead } from "@/lib/queries";
 import {
   sendTemplateToLeads,
+  dispatchCampaign,
   type ApprovedTemplate,
   type OutreachSummary,
+  type Campaign,
 } from "@/lib/actions";
 import { Badge } from "./ui";
 import { formatDate, formatDateTime } from "@/lib/utils";
@@ -77,11 +79,13 @@ export function LeadList({
   slug,
   leads,
   templates,
+  campaigns,
   sendEnabled,
 }: {
   slug: string;
   leads: FormLead[];
   templates: ApprovedTemplate[];
+  campaigns: Campaign[];
   sendEnabled: boolean;
 }) {
   const [detail, setDetail] = React.useState<FormLead | null>(null);
@@ -295,6 +299,7 @@ export function LeadList({
         <CampaignModal
           slug={slug}
           templates={templates}
+          campaigns={campaigns}
           targets={targets}
           onClose={() => setCampaignOpen(false)}
           onDone={() => {
@@ -323,16 +328,22 @@ function fillPreview(
 function CampaignModal({
   slug,
   templates,
+  campaigns,
   targets,
   onClose,
   onDone,
 }: {
   slug: string;
   templates: ApprovedTemplate[];
+  campaigns: Campaign[];
   targets: { phone: string; name: string }[];
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [mode, setMode] = React.useState<"saved" | "avulso">(
+    campaigns.length > 0 ? "saved" : "avulso",
+  );
+  const [campaignId, setCampaignId] = React.useState(campaigns[0]?.id ?? "");
   const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
   const [shared, setShared] = React.useState<string[]>([]);
   const [sending, setSending] = React.useState(false);
@@ -343,6 +354,7 @@ function CampaignModal({
   const varCount = tpl?.varCount ?? 0;
   // {{1}} = nome (automático). Campos do usuário: {{2}}..{{varCount}}.
   const sharedNeeded = Math.max(0, varCount - 1);
+  const campaign = campaigns.find((c) => c.id === campaignId) ?? null;
 
   // reseta os campos compartilhados ao trocar de template.
   React.useEffect(() => {
@@ -366,22 +378,26 @@ function CampaignModal({
     sharedNeeded > 0 && shared.slice(0, sharedNeeded).some((v) => !v.trim());
   const firstName = targets[0]?.name?.trim() || "cliente";
 
+  const confirmDisabled =
+    sending ||
+    targets.length === 0 ||
+    (mode === "saved" ? !campaign : !tpl || missing);
+
   async function confirmar() {
-    if (!tpl || sending) return;
-    if (missing) {
-      setError("Preencha todas as variáveis compartilhadas antes de disparar.");
-      return;
-    }
+    if (sending || confirmDisabled) return;
     setSending(true);
     setError(null);
-    const res = await sendTemplateToLeads(
-      slug,
-      targets,
-      tpl.name,
-      tpl.language,
-      shared.slice(0, sharedNeeded),
-      varCount,
-    );
+    const res =
+      mode === "saved"
+        ? await dispatchCampaign(slug, campaignId, targets)
+        : await sendTemplateToLeads(
+            slug,
+            targets,
+            tpl!.name,
+            tpl!.language,
+            shared.slice(0, sharedNeeded),
+            varCount,
+          );
     setSending(false);
     if (!res.ok) {
       setError(res.error ?? "Não foi possível disparar.");
@@ -429,10 +445,82 @@ function CampaignModal({
             <ResultView result={result} />
           ) : (
             <>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted">
-                  Template aprovado
-                </label>
+              {/* Seletor de modo */}
+              {campaigns.length > 0 ? (
+                <div className="flex rounded-lg border border-border bg-surface-2/60 p-0.5 text-xs font-medium">
+                  <button
+                    onClick={() => setMode("saved")}
+                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+                      mode === "saved"
+                        ? "brand-gradient text-white"
+                        : "text-muted hover:text-fg"
+                    }`}
+                  >
+                    Campanha salva
+                  </button>
+                  <button
+                    onClick={() => setMode("avulso")}
+                    className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+                      mode === "avulso"
+                        ? "brand-gradient text-white"
+                        : "text-muted hover:text-fg"
+                    }`}
+                  >
+                    Avulso
+                  </button>
+                </div>
+              ) : null}
+
+              {mode === "saved" ? (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted">
+                      Campanha salva
+                    </label>
+                    <div className="relative">
+                      <Megaphone className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
+                      <select
+                        value={campaignId}
+                        onChange={(e) => setCampaignId(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm text-fg outline-none focus:border-secondary/50"
+                      >
+                        {campaigns.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {campaign ? (
+                    <>
+                      <p className="text-[11px] text-muted-2">
+                        Template: {campaign.templateName} ({campaign.templateLang})
+                      </p>
+                      {campaign.body ? (
+                        <div>
+                          <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-2">
+                            Prévia para {firstName}
+                          </p>
+                          <p className="whitespace-pre-wrap rounded-lg border border-secondary/25 bg-gradient-to-br from-secondary/15 to-accent-2/10 px-3 py-2.5 text-sm text-fg">
+                            {fillPreview(campaign.body, firstName, campaign.vars)}
+                          </p>
+                        </div>
+                      ) : null}
+                      <p className="flex items-center gap-1.5 text-[11px] text-[#c4b5fd]">
+                        <User className="size-3.5 shrink-0" />
+                        {"{{1}}"} = nome de cada lead (automático)
+                      </p>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-muted">
+                      Template aprovado
+                    </label>
                 {templates.length === 0 ? (
                   <p className="rounded-lg border border-border bg-surface-2/60 px-3 py-2.5 text-xs text-muted-2">
                     Nenhum template aprovado disponível para este agente.
@@ -517,14 +605,15 @@ function CampaignModal({
                   </p>
                 </div>
               ) : null}
+                </>
+              )}
 
               <div className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2.5 text-xs text-accent">
                 <TriangleAlert className="mt-0.5 size-4 shrink-0" />
                 <span>
                   Isso envia uma mensagem real de WhatsApp para{" "}
                   <strong>{targets.length}</strong> pessoa
-                  {targets.length > 1 ? "s" : ""}. Verifique o template antes de
-                  confirmar.
+                  {targets.length > 1 ? "s" : ""}. Verifique antes de confirmar.
                 </span>
               </div>
 
@@ -549,7 +638,7 @@ function CampaignModal({
           ) : (
             <button
               onClick={confirmar}
-              disabled={sending || !tpl || targets.length === 0 || missing}
+              disabled={confirmDisabled}
               className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sending ? (

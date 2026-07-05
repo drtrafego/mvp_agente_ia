@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   MessagesSquare,
   MessageSquareText,
+  Megaphone,
   Users,
   KanbanSquare,
   Sparkles,
@@ -41,6 +42,11 @@ function buildNav(slug: string): NavItem[] {
       href: `/${slug}/templates`,
       label: "Mensagens",
       icon: <MessageSquareText className="size-[18px]" />,
+    },
+    {
+      href: `/${slug}/campaigns`,
+      label: "Campanhas",
+      icon: <Megaphone className="size-[18px]" />,
     },
     {
       href: `/${slug}/pipeline`,
