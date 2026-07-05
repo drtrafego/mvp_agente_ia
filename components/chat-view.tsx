@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { ArrowLeft, Bot, User, DollarSign } from "lucide-react";
+import { ArrowLeft, Bot, User, DollarSign, FileText } from "lucide-react";
 import type { ConversationRow, MessageRow } from "@/lib/queries";
 import type { ApprovedTemplate } from "@/lib/actions";
 import { Badge } from "./ui";
 import { ChannelIcon } from "./channel-icon";
 import { ChatControls } from "./chat-controls";
-import { cleanMessage } from "@/lib/clean-content";
+import { cleanMessage, type MediaItem } from "@/lib/clean-content";
 import { channelLabel, formatDateTime, formatUSD } from "@/lib/utils";
 
 export function ChatView({
@@ -63,7 +63,12 @@ export function ChatView({
           </p>
         ) : (
           messages.map((m) => (
-            <Bubble key={m.id} message={m} channel={conversation.channel} />
+            <Bubble
+              key={m.id}
+              message={m}
+              channel={conversation.channel}
+              slug={slug}
+            />
           ))
         )}
       </div>
@@ -83,12 +88,14 @@ export function ChatView({
 function Bubble({
   message,
   channel,
+  slug,
 }: {
   message: MessageRow;
   channel: string | null;
+  slug: string;
 }) {
   const isUser = message.role === "user";
-  const content = cleanMessage(message.content, message.role, channel);
+  const { text, media } = cleanMessage(message.content, message.role, channel);
   return (
     <div
       className={`flex items-end gap-2.5 ${
@@ -105,13 +112,23 @@ function Bubble({
         {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
       </div>
       <div
-        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+        className={`min-w-0 max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
           isUser
             ? "rounded-bl-sm bg-surface-2 text-fg"
             : "rounded-br-sm bg-gradient-to-br from-secondary/20 to-accent-2/15 text-fg ring-1 ring-inset ring-secondary/25"
         }`}
       >
-        <p className="whitespace-pre-wrap break-words">{content}</p>
+        {text ? (
+          <p className="whitespace-pre-wrap break-words">{text}</p>
+        ) : null}
+        {media.map((m, i) => (
+          <MediaBlock
+            key={`${m.file}-${i}`}
+            item={m}
+            slug={slug}
+            spaced={!!text || i > 0}
+          />
+        ))}
         {message.ts ? (
           <span className="mt-1 block text-[10px] text-muted-2">
             {formatDateTime(message.ts)}
@@ -119,5 +136,68 @@ function Bubble({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function MediaBlock({
+  item,
+  slug,
+  spaced,
+}: {
+  item: MediaItem;
+  slug: string;
+  spaced: boolean;
+}) {
+  const src = `/api/media?agente=${encodeURIComponent(
+    slug,
+  )}&file=${encodeURIComponent(item.file)}`;
+  const wrap = spaced ? "mt-2" : "";
+
+  if (item.kind === "audio") {
+    return (
+      <audio
+        controls
+        preload="metadata"
+        src={src}
+        className={`${wrap} w-full min-w-[220px] rounded-lg`}
+      />
+    );
+  }
+
+  if (item.kind === "image") {
+    return (
+      <a href={src} target="_blank" rel="noopener noreferrer" className={`${wrap} block`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt="Imagem enviada"
+          loading="lazy"
+          className="max-h-72 w-auto max-w-full rounded-xl border border-border object-cover shadow-soft transition-opacity hover:opacity-90"
+        />
+      </a>
+    );
+  }
+
+  if (item.kind === "video") {
+    return (
+      <video
+        controls
+        preload="metadata"
+        src={src}
+        className={`${wrap} max-h-72 w-full max-w-full rounded-xl border border-border`}
+      />
+    );
+  }
+
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${wrap} flex items-center gap-2 rounded-xl border border-border bg-surface-2/70 px-3 py-2 text-xs font-medium text-fg transition-colors hover:bg-surface-3`}
+    >
+      <FileText className="size-4 shrink-0 text-secondary" />
+      <span className="truncate">{item.file}</span>
+    </a>
   );
 }

@@ -12,23 +12,47 @@ const BOILERPLATE_PATTERNS: RegExp[] = [
   /you are the email agent/i,
 ];
 
+export type MediaKind = "audio" | "image" | "video" | "document";
+export type MediaItem = { kind: MediaKind; file: string };
+export type CleanedMessage = { text: string; media: MediaItem[] };
+
+// Marcador injetado pelo Hermes: [[HMEDIA:<kind>:<filename>]]
+const MEDIA_PATTERN =
+  /\[\[HMEDIA:(audio|image|video|document):([A-Za-z0-9._-]+)\]\]/g;
+
 export function cleanMessage(
   content: string | null | undefined,
   role: string,
   _channel?: string | null,
-): string {
-  if (!content) return "";
-  let text = content;
+): CleanedMessage {
+  if (!content) return { text: "", media: [] };
+
+  // Extrai a mídia primeiro e remove os marcadores do texto.
+  const { text: withoutMedia, media } = extractMedia(content);
 
   // (b) tira o wrapper de transcrição de voz, deixa só o que foi dito.
-  text = stripVoiceMarker(text);
+  let text = stripVoiceMarker(withoutMedia);
 
   // (a) limpeza de e-mail só faz sentido nas mensagens do lead.
   if (role === "user" && looksLikeEmailPayload(text)) {
-    return extractEmailBody(text) ?? EMAIL_FALLBACK;
+    return { text: extractEmailBody(text) ?? EMAIL_FALLBACK, media };
   }
 
-  return text.trim();
+  return { text: text.trim(), media };
+}
+
+function extractMedia(content: string): { text: string; media: MediaItem[] } {
+  const media: MediaItem[] = [];
+  const text = content
+    .replace(MEDIA_PATTERN, (_m, kind: MediaKind, file: string) => {
+      media.push({ kind, file });
+      return "";
+    })
+    // colapsa espaços/linhas em branco deixados pelos marcadores removidos.
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { text, media };
 }
 
 function stripVoiceMarker(text: string): string {
