@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { ArrowLeft, Bot, User, DollarSign } from "lucide-react";
-import type { ConversationRow, MessageRow, MetaLead } from "@/lib/queries";
+import type { ConversationRow, MessageRow } from "@/lib/queries";
 import { Badge } from "./ui";
 import { ChannelIcon } from "./channel-icon";
 import { ChatControls } from "./chat-controls";
-import { LeadCard } from "./lead-card";
 import { cleanMessage } from "@/lib/clean-content";
 import { channelLabel, formatDateTime, formatUSD } from "@/lib/utils";
 
@@ -13,19 +12,18 @@ export function ChatView({
   conversation,
   messages,
   isPaused,
-  lead,
 }: {
   slug: string;
   conversation: ConversationRow;
   messages: MessageRow[];
   isPaused: boolean;
-  lead: MetaLead | null;
 }) {
   return (
-    <div className="flex h-[calc(100dvh-8rem)] flex-col rounded-xl border border-border bg-surface">
-      <div className="flex items-start gap-3 border-b border-border p-4">
+    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
+      <div className="flex items-start gap-3 border-b border-border px-4 py-3.5">
         <Link
           href={`/${slug}/conversas`}
+          scroll={false}
           className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
           aria-label="Voltar"
         >
@@ -52,8 +50,6 @@ export function ChatView({
           </span>
         </div>
       </div>
-
-      <LeadCard lead={lead} />
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
         {messages.length === 0 ? (
@@ -96,16 +92,16 @@ function Bubble({
         className={`grid size-7 shrink-0 place-items-center rounded-full ${
           isUser
             ? "bg-surface-3 text-muted"
-            : "bg-primary/20 text-secondary ring-1 ring-primary/40"
+            : "brand-gradient text-white ring-1 ring-accent-2/40"
         }`}
       >
         {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
       </div>
       <div
-        className={`max-w-[78%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+        className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
           isUser
             ? "rounded-bl-sm bg-surface-2 text-fg"
-            : "rounded-br-sm bg-primary/15 text-fg ring-1 ring-inset ring-primary/25"
+            : "rounded-br-sm bg-gradient-to-br from-secondary/20 to-accent-2/15 text-fg ring-1 ring-inset ring-secondary/25"
         }`}
       >
         <p className="whitespace-pre-wrap break-words">{content}</p>

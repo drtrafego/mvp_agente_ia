@@ -145,7 +145,7 @@ export function ChatControls({
               <button
                 type="submit"
                 disabled={sending || !text.trim()}
-                className="inline-flex h-[42px] items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-medium text-primary-fg transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="brand-gradient inline-flex h-[42px] items-center gap-1.5 rounded-lg px-3.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {sending ? (
                   <Loader2 className="size-4 animate-spin" />

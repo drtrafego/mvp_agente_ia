@@ -11,6 +11,7 @@ import { getAgent } from "@/lib/agents";
 import { getOverview } from "@/lib/queries";
 import { formatUSD, formatNumber, formatCompact } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+import { PageWrapper } from "@/components/page-wrapper";
 import { KpiCard, KpiSkeleton } from "@/components/kpi";
 import { Card, Skeleton } from "@/components/ui";
 import { ConversationsChart, CostChart, ChannelDonut } from "@/components/charts";
@@ -26,7 +27,7 @@ export default async function OverviewPage({
   const agent = getAgent(slug);
 
   return (
-    <>
+    <PageWrapper>
       <PageHeader
         title="Visão geral"
         subtitle={`Desempenho do agente ${agent?.name ?? ""}`}
@@ -34,7 +35,7 @@ export default async function OverviewPage({
       <Suspense fallback={<OverviewSkeleton />}>
         <OverviewContent slug={slug} />
       </Suspense>
-    </>
+    </PageWrapper>
   );
 }
 
@@ -50,6 +51,7 @@ async function OverviewContent({ slug }: { slug: string }) {
           value={formatNumber(o.conversations)}
           icon={<MessagesSquare className="size-4" />}
           tone="secondary"
+          featured
         />
         <KpiCard
           label="Mensagens"
@@ -94,7 +96,7 @@ async function OverviewContent({ slug }: { slug: string }) {
         </Card>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="p-5 lg:col-span-2">
+          <Card glass className="p-5 lg:col-span-2">
             <ChartHeader
               icon={<TrendingUp className="size-4 text-secondary" />}
               title="Conversas por dia"
@@ -103,7 +105,7 @@ async function OverviewContent({ slug }: { slug: string }) {
             <ConversationsChart data={o.byDay} />
           </Card>
 
-          <Card className="p-5">
+          <Card glass className="p-5">
             <ChartHeader
               icon={<DollarSign className="size-4 text-accent" />}
               title="Custo por dia"
@@ -112,7 +114,7 @@ async function OverviewContent({ slug }: { slug: string }) {
             <CostChart data={o.byDay} />
           </Card>
 
-          <Card className="p-5">
+          <Card glass className="p-5">
             <ChartHeader
               icon={<Radio className="size-4 text-secondary" />}
               title="Distribuição por canal"

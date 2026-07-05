@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Info, Sparkles } from "lucide-react";
 import { getLeads, STAGES, type Stage, type Lead } from "@/lib/queries";
 import { PageHeader } from "@/components/page-header";
+import { PageWrapper } from "@/components/page-wrapper";
 import { Badge } from "@/components/ui";
 import { ChannelIcon } from "@/components/channel-icon";
 import { channelLabel, formatNumber, timeAgo } from "@/lib/utils";
@@ -28,7 +29,7 @@ export default async function PipelinePage({
   const total = STAGES.reduce((s, st) => s + board[st].length, 0);
 
   return (
-    <>
+    <PageWrapper>
       <PageHeader
         title="Pipeline de leads"
         subtitle={`${formatNumber(total)} contatos distribuídos por etapa`}
@@ -61,7 +62,7 @@ export default async function PipelinePage({
           </p>
         </>
       )}
-    </>
+    </PageWrapper>
   );
 }
 
@@ -76,7 +77,7 @@ function Column({
 }) {
   const meta = STAGE_META[stage];
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-surface/50">
+    <div className="flex flex-col rounded-xl border border-border glass shadow-soft">
       <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
         <div className="flex items-center gap-2">
           <span className={`h-4 w-1 rounded-full ${meta.bar}`} />
@@ -92,7 +93,7 @@ function Column({
             <Link
               key={lead.session_id}
               href={`/${slug}/conversas?c=${encodeURIComponent(lead.session_id)}`}
-              className="group rounded-lg border border-border bg-surface p-3 transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface-2"
+              className="group rounded-lg border border-border bg-surface p-3 shadow-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-secondary/40 hover:bg-surface-2"
             >
               <p className="line-clamp-2 text-sm font-medium leading-snug">
                 {lead.title ?? "Conversa sem título"}

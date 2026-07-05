@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   Bot,
+  Sparkles,
   DollarSign,
   MessageSquare,
   MessagesSquare,
@@ -55,12 +56,12 @@ export default async function PortalPage() {
       <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="animate-fade-up">
           <div className="mb-3 flex items-center gap-2.5">
-            <div className="grid size-9 place-items-center rounded-lg bg-primary/20 text-secondary ring-1 ring-primary/40">
-              <Bot className="size-5" />
+            <div className="grid size-9 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
+              <Sparkles className="size-5" />
             </div>
             <span className="text-sm font-medium text-muted">Central de Agentes IA</span>
           </div>
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h1 className="text-gradient inline-block text-3xl font-semibold tracking-tight sm:text-4xl">
             Painel de atendimento
           </h1>
           <p className="mt-2 max-w-md text-sm text-muted">
@@ -89,7 +90,7 @@ export default async function PortalPage() {
               key={agent.slug}
               href={`/${agent.slug}`}
               style={{ animationDelay: `${i * 60}ms` }}
-              className={`group relative animate-fade-up overflow-hidden rounded-xl border border-border bg-surface p-5 ring-1 ring-inset ${accent.ring} transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary`}
+              className={`group relative animate-fade-up overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-soft ring-1 ring-inset ${accent.ring} transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary`}
             >
               <div
                 className={`pointer-events-none absolute -right-16 -top-16 size-40 rounded-full bg-gradient-to-br ${accent.glow} to-transparent opacity-70 blur-2xl`}

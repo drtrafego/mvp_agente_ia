@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plano de Redesign — Dashboard de Agentes</title>
+<style>
+  :root{
+    --bg:#0b0f17; --surface:#131a26; --surface2:#1a2333; --surface3:#212c40;
+    --border:#1f2a3c; --border2:#2c3a52; --fg:#eef2f8; --muted:#9aa7bd; --muted2:#6b7893;
+    --blue:#3b82f6; --violet:#8b5cf6; --amber:#d97706; --green:#16a34a; --red:#dc2626;
+    --grad:linear-gradient(135deg,#3b82f6,#8b5cf6);
+    --radius:14px; --shadow:0 8px 30px -8px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:'Inter',system-ui,-apple-system,sans-serif;
+    line-height:1.55;padding:40px 20px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:980px;margin:0 auto}
+  .hero{text-align:center;padding:28px 20px 40px}
+  .badge{display:inline-block;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:#bcd0ff;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.3);
+    padding:6px 14px;border-radius:999px;margin-bottom:18px}
+  h1{font-size:34px;font-weight:800;letter-spacing:-.02em;margin-bottom:10px}
+  .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:16px;max-width:620px;margin:0 auto}
+  h2{font-size:13px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted2);
+    margin:44px 0 16px;display:flex;align-items:center;gap:10px}
+  h2::before{content:"";width:22px;height:2px;background:var(--grad);border-radius:2px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:22px;box-shadow:var(--shadow)}
+  .grid{display:grid;gap:16px}
+  .g3{grid-template-columns:repeat(3,1fr)} .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:720px){.g3,.g2{grid-template-columns:1fr}}
+  .ref h3{font-size:16px;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+  .dot{width:9px;height:9px;border-radius:50%}
+  .ref .tag{font-size:11px;color:var(--muted2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px}
+  .ref ul{list-style:none;font-size:14px;color:var(--muted)}
+  .ref li{padding:4px 0 4px 18px;position:relative}
+  .ref li::before{content:"→";position:absolute;left:0;color:var(--blue)}
+  .take{color:#a7f3d0;font-size:13px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--border2)}
+  .swatches{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+  .sw{width:64px;text-align:center;font-size:11px;color:var(--muted2)}
+  .sw i{display:block;height:44px;border-radius:10px;border:1px solid var(--border2);margin-bottom:6px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted2);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  td b{color:var(--fg)} td span{color:var(--muted)}
+  .pill{display:inline-block;font-size:11px;padding:3px 9px;border-radius:999px;font-weight:600}
+  .keep{background:rgba(22,163,74,.15);color:#4ade80;border:1px solid rgba(22,163,74,.3)}
+  .new{background:rgba(139,92,246,.15);color:#c4b5fd;border:1px solid rgba(139,92,246,.3)}
+  .phase{display:flex;gap:16px;align-items:flex-start;padding:16px 0;border-bottom:1px solid var(--border)}
+  .phase:last-child{border:0}
+  .num{flex-shrink:0;width:34px;height:34px;border-radius:10px;background:var(--grad);
+    display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff}
+  .phase h4{font-size:15px;margin-bottom:3px}
+  .phase p{font-size:13px;color:var(--muted)}
+  .foot{text-align:center;color:var(--muted2);font-size:13px;margin-top:40px;padding-top:24px;border-top:1px solid var(--border)}
+  .mock{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-top:8px}
+  .mock .bar{height:34px;background:var(--surface3);display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid var(--border)}
+  .mock .bar i{width:9px;height:9px;border-radius:50%;background:var(--border2)}
+  .mock .body{display:flex;min-height:150px}
+  .mock .side{width:130px;border-right:1px solid var(--border);padding:12px;background:var(--surface)}
+  .mock .brand{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+  .mock .brand em{width:26px;height:26px;border-radius:8px;background:var(--grad);display:block}
+  .mock .brand span{font-size:12px;font-weight:700}
+  .mock .nav{height:9px;border-radius:5px;background:var(--surface3);margin:8px 0}
+  .mock .nav.on{background:rgba(59,130,246,.25);border-left:2px solid var(--blue)}
+  .mock .main{flex:1;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .mock .kpis{display:flex;gap:8px}
+  .mock .kpi{flex:1;height:46px;border-radius:10px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow)}
+  .mock .kpi:first-child{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(139,92,246,.12));border-color:rgba(99,102,241,.35)}
+  .mock .row{flex:1;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="badge">Relatório de Redesign</div>
+    <h1>Dashboard de Agentes <span class="grad">Escuro Premium</span></h1>
+    <p class="sub">Como o layout será refeito, puxando o melhor do <b>ia_agent</b> e do <b>mvp_agent_vibe</b>, mantendo o tema escuro e todas as funções que já estão no ar.</p>
+  </div>
+
+  <h2>1. O que cada referência traz</h2>
+  <div class="grid g3">
+    <div class="card ref">
+      <h3><span class="dot" style="background:#3b82f6"></span> mvp_agent_vibe</h3>
+      <div class="tag">a base estrutural</div>
+      <ul>
+        <li>shadcn/ui completo e atual</li>
+        <li>Sidebar recolhível (design system)</li>
+        <li>Command palette (⌘K)</li>
+        <li>Inbox = conversa + detalhe</li>
+        <li>next-themes (claro/escuro)</li>
+        <li>Recharts (gráficos)</li>
+      </ul>
+      <div class="take">✔ Vira a FUNDAÇÃO: componentes, sidebar e o padrão Inbox.</div>
+    </div>
+    <div class="card ref">
+      <h3><span class="dot" style="background:#8b5cf6"></span> ia_agent</h3>
+      <div class="tag">o acabamento</div>
+      <ul>
+        <li>Marca com gradiente azul→roxo</li>
+        <li>Glassmorphism (cards frosted)</li>
+        <li>Sombras suaves + cantos grandes</li>
+        <li>Títulos em gradiente</li>
+        <li>Fade-in nas páginas</li>
+      </ul>
+      <div class="take">✔ Vira o VERNIZ: brilho visual por cima da base.</div>
+    </div>
+    <div class="card ref">
+      <h3><span class="dot" style="background:#16a34a"></span> nosso mvp (atual)</h3>
+      <div class="tag">o que já funciona</div>
+      <ul>
+        <li>Conversa em chat (bolhas)</li>
+        <li>Pausar / assumir o bot</li>
+        <li>Card de atribuição do lead</li>
+        <li>Funil (abordagens→respostas)</li>
+        <li>Lê do Neon, no ar</li>
+      </ul>
+      <div class="take">✔ NADA disso se perde — só ganha roupa nova.</div>
+    </div>
+  </div>
+
+  <h2>2. Direção: Escuro Premium</h2>
+  <div class="card">
+    <p style="color:var(--muted);margin-bottom:18px">Base shadcn do <b>mvp_agent_vibe</b> no modo escuro + gradientes e glassmorphism do <b>ia_agent</b>. Paleta:</p>
+    <div class="swatches">
+      <div class="sw"><i style="background:#0b0f17"></i>fundo</div>
+      <div class="sw"><i style="background:#131a26"></i>superfície</div>
+      <div class="sw"><i style="background:#1a2333"></i>card</div>
+      <div class="sw"><i style="background:linear-gradient(135deg,#3b82f6,#8b5cf6)"></i>marca</div>
+      <div class="sw"><i style="background:#3b82f6"></i>azul</div>
+      <div class="sw"><i style="background:#8b5cf6"></i>roxo</div>
+      <div class="sw"><i style="background:#d97706"></i>âmbar</div>
+      <div class="sw"><i style="background:#16a34a"></i>sucesso</div>
+    </div>
+    <div class="mock">
+      <div class="bar"><i></i><i></i><i></i></div>
+      <div class="body">
+        <div class="side">
+          <div class="brand"><em></em><span>Agentes</span></div>
+          <div class="nav on"></div><div class="nav"></div><div class="nav"></div><div class="nav"></div>
+        </div>
+        <div class="main">
+          <div class="kpis"><div class="kpi"></div><div class="kpi"></div><div class="kpi"></div></div>
+          <div class="row"></div>
+        </div>
+      </div>
+    </div>
+    <p style="color:var(--muted2);font-size:12px;margin-top:10px;text-align:center">Prévia esquemática: marca em gradiente, KPI de destaque em gradiente, cards com sombra, sidebar limpa.</p>
+  </div>
+
+  <h2>3. Tela por tela</h2>
+  <div class="card" style="padding:6px 22px">
+    <table>
+      <tr><th>Tela</th><th>O que muda</th><th></th></tr>
+      <tr><td><b>Sidebar</b></td><td><span>Marca com gradiente + nome/subtítulo, itens com ícone e estado ativo com glow, recolhível</span></td><td><span class="pill new">novo</span></td></tr>
+      <tr><td><b>Visão geral</b></td><td><span>KPIs premium (número grande, ícone, gradiente no principal), gráficos Recharts consistentes</span></td><td><span class="pill new">novo</span></td></tr>
+      <tr><td><b>Conversas</b></td><td><span>Vira padrão <b>Inbox</b>: lista à esquerda, chat no meio, <b>card do lead</b> à direita. Bolhas mantidas</span></td><td><span class="pill keep">mantém função</span></td></tr>
+      <tr><td><b>Pausar / responder</b></td><td><span>Mesmos botões, com visual novo (switch, composer estilo shadcn)</span></td><td><span class="pill keep">mantém função</span></td></tr>
+      <tr><td><b>Card do lead</b></td><td><span>Vira painel lateral fixo (glass), com nome, telefone, campanha, anúncio, campos do form</span></td><td><span class="pill keep">mantém função</span></td></tr>
+      <tr><td><b>Pipeline</b></td><td><span>Kanban com dnd-kit, cards com sombra suave</span></td><td><span class="pill new">novo</span></td></tr>
+    </table>
+  </div>
+
+  <h2>4. Como será feito (fases)</h2>
+  <div class="card">
+    <div class="phase"><div class="num">1</div><div><h4>Fundação shadcn no escuro</h4><p>Trago o sistema de tokens + componentes do mvp_agent_vibe (sidebar, card, button, tabs, badge…) já no modo escuro. Base sólida sem quebrar o que existe.</p></div></div>
+    <div class="phase"><div class="num">2</div><div><h4>Shell + sidebar premium</h4><p>Marca com gradiente, navegação nova, header, fade-in. O "esqueleto" que dá a cara de SaaS.</p></div></div>
+    <div class="phase"><div class="num">3</div><div><h4>Migrar as telas (mantendo função)</h4><p>Visão geral (KPIs+gráficos), Conversas no padrão Inbox com o card do lead, Pipeline. Chat, pausar/responder e atribuição continuam funcionando.</p></div></div>
+    <div class="phase"><div class="num">4</div><div><h4>Verniz ia_agent</h4><p>Glassmorphism, sombras, títulos em gradiente, microanimações. O acabamento final.</p></div></div>
+    <div class="phase"><div class="num">5</div><div><h4>Build + deploy</h4><p>Testo o build/typecheck, dou push — a Vercel sobe sozinha (auto-deploy já ligado). Você abre e confere.</p></div></div>
+  </div>
+
+  <h2>5. Garantias</h2>
+  <div class="grid g2">
+    <div class="card"><h3 style="font-size:15px;margin-bottom:8px">✅ Nada de função se perde</h3><p style="color:var(--muted);font-size:14px">Chat, pausar/assumir, card do lead, funil, leitura do Neon — tudo preservado. É troca de roupa, não de motor.</p></div>
+    <div class="card"><h3 style="font-size:15px;margin-bottom:8px">🔒 Cliente isolado</h3><p style="color:var(--muted);font-size:14px">Sem misturar dados de clientes (regra crítica). O dashboard segue só com os agentes/leads que são seus.</p></div>
+  </div>
+
+  <div class="foot">
+    Aprovando este plano, começo pela fase 1. GitHub↔Vercel já conectado → cada etapa sobe sozinha pra você acompanhar ao vivo.<br>
+    <b>Dashboard de Agentes · Casal do Tráfego</b>
+  </div>
+
+</div>
+</body>
+</html>

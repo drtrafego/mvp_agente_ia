@@ -1,4 +1,4 @@
-import { Bot, LockKeyhole } from "lucide-react";
+import { Sparkles, LockKeyhole } from "lucide-react";
 
 export default async function LoginPage({
   searchParams,
@@ -11,11 +11,13 @@ export default async function LoginPage({
     <main className="flex min-h-dvh items-center justify-center px-4">
       <div className="w-full max-w-sm animate-fade-up">
         <div className="mb-6 flex items-center gap-3">
-          <div className="grid size-11 place-items-center rounded-xl bg-primary/20 text-secondary ring-1 ring-primary/40">
-            <Bot className="size-6" />
+          <div className="grid size-11 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
+            <Sparkles className="size-6" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Central de Agentes</h1>
+            <h1 className="text-gradient inline-block text-lg font-semibold tracking-tight">
+              Central de Agentes
+            </h1>
             <p className="text-sm text-muted">Painel de atendimento IA</p>
           </div>
         </div>
@@ -23,7 +25,7 @@ export default async function LoginPage({
         <form
           action="/api/auth"
           method="POST"
-          className="rounded-xl border border-border bg-surface p-6"
+          className="rounded-2xl border border-border glass p-6 shadow-soft"
         >
           <input type="hidden" name="from" value={from} />
           <label className="mb-2 block text-sm font-medium text-muted">
@@ -45,7 +47,7 @@ export default async function LoginPage({
           ) : null}
           <button
             type="submit"
-            className="mt-4 w-full rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-fg transition-colors hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-secondary/50"
+            className="brand-gradient mt-4 w-full rounded-lg py-2.5 text-sm font-medium text-white transition-all hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-secondary/50"
           >
             Entrar
           </button>
