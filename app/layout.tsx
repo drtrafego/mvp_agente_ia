@@ -11,6 +11,13 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Central de Agentes IA",
   description: "Painel de gestão de agentes de atendimento (SAC)",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    apple: "/apple-icon.png",
+  },
 };
 
 export default function RootLayout({
