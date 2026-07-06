@@ -20,6 +20,7 @@ import {
   type ApprovedTemplate,
 } from "@/lib/actions";
 import { Card, Badge } from "@/components/ui";
+import { ModalPortal } from "@/components/modal-portal";
 import { formatDateTime } from "@/lib/utils";
 
 function fillPreview(body: string, leadName: string, vars: string[]): string {
@@ -224,8 +225,9 @@ function CreateCampaignModal({
   }
 
   return (
+    <ModalPortal>
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
     >
@@ -233,7 +235,7 @@ function CreateCampaignModal({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
         onClick={() => (saving ? null : onClose())}
       />
-      <div className="relative flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:rounded-2xl">
+      <div className="relative flex max-h-[100dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:max-h-[90dvh] sm:rounded-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-border p-5">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
@@ -382,5 +384,6 @@ function CreateCampaignModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

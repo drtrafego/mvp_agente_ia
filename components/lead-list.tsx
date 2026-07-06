@@ -33,6 +33,7 @@ import {
   type Campaign,
 } from "@/lib/actions";
 import { Badge } from "./ui";
+import { ModalPortal } from "./modal-portal";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -425,8 +426,9 @@ function CampaignModal({
   }
 
   return (
+    <ModalPortal>
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
     >
@@ -434,7 +436,7 @@ function CampaignModal({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
         onClick={() => (sending ? null : onClose())}
       />
-      <div className="relative flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:rounded-2xl">
+      <div className="relative flex max-h-[100dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:max-h-[90dvh] sm:rounded-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-border p-5">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
@@ -675,6 +677,7 @@ function CampaignModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -756,8 +759,9 @@ function LeadModal({
   );
 
   return (
+    <ModalPortal>
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
     >
@@ -765,7 +769,7 @@ function LeadModal({
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
         onClick={onClose}
       />
-      <div className="relative flex max-h-[90dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:rounded-2xl">
+      <div className="relative flex max-h-[100dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:max-h-[90dvh] sm:rounded-2xl">
         {/* Header */}
         <div className="flex items-start justify-between gap-3 border-b border-border p-5">
           <div className="flex min-w-0 items-center gap-3">
@@ -894,5 +898,6 @@ function LeadModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
