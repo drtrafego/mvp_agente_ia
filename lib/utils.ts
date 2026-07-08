@@ -35,6 +35,14 @@ export function formatDate(value: string | Date | null | undefined): string {
   }).format(new Date(value));
 }
 
+export function formatDateShort(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+  }).format(new Date(value));
+}
+
 export function formatDateTime(value: string | Date | null | undefined): string {
   if (!value) return "sem registro";
   return new Intl.DateTimeFormat("pt-BR", {

@@ -90,7 +90,7 @@ export function KpiCard({
           {icon}
         </span>
       </div>
-      <div className="relative mt-3 flex items-center gap-2">
+      <div className="relative mt-3 flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="tnum text-2xl font-semibold tracking-tight sm:text-[1.7rem]">
           {value}
         </span>

@@ -417,6 +417,53 @@ export async function createCampaign(
   }
 }
 
+export async function updateCampaign(
+  slug: string,
+  id: string,
+  data: {
+    name: string;
+    templateName: string;
+    lang: string;
+    vars: string[];
+    body: string;
+  },
+): Promise<ActionResult> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    if (!id) return { ok: false, error: "Campanha inválida." };
+    const name = data.name?.trim();
+    if (!name) return { ok: false, error: "Dê um nome à campanha." };
+    if (!data.templateName)
+      return { ok: false, error: "Selecione um template." };
+
+    await ensureCampaignsTable();
+    const vars = (data.vars ?? []).map((v) => v.trim());
+
+    await sql.unsafe(
+      `update public.campaigns set
+         name = $3,
+         template_name = $4,
+         template_lang = $5,
+         template_vars = $6::jsonb,
+         template_body = $7
+       where id = $1 and agent_slug = $2`,
+      [
+        id,
+        slug,
+        name,
+        data.templateName,
+        data.lang || "pt_BR",
+        JSON.stringify(vars),
+        data.body ?? "",
+      ],
+    );
+    revalidatePath(`/${slug}/campaigns`);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro inesperado ao editar a campanha." };
+  }
+}
+
 export async function listCampaigns(slug: string): Promise<Campaign[]> {
   try {
     if (!getAgent(slug)) return [];

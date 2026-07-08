@@ -34,7 +34,7 @@ import {
 } from "@/lib/actions";
 import { Badge } from "./ui";
 import { ModalPortal } from "./modal-portal";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateShort, formatDateTime } from "@/lib/utils";
 
 const FIELD_LABELS: Record<string, string> = {
   full_name: "Nome",
@@ -173,10 +173,10 @@ export function LeadList({
 
       <div className="animate-fade-up overflow-hidden rounded-2xl border border-border glass shadow-soft">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full table-fixed text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-2">
-                <th className="w-10 px-4 py-3">
+                <th className="w-10 px-3 py-3 sm:px-4">
                   <input
                     type="checkbox"
                     aria-label="Selecionar todos os Aguardando"
@@ -186,21 +186,23 @@ export function LeadList({
                     className="size-4 accent-[#8b5cf6]"
                   />
                 </th>
-                <th className="px-4 py-3 font-medium">Nome</th>
-                <th className="px-4 py-3 font-medium">Telefone</th>
-                <th className="hidden px-4 py-3 font-medium md:table-cell">
+                <th className="px-3 py-3 font-medium sm:px-4">Nome</th>
+                <th className="hidden w-36 px-4 py-3 font-medium md:table-cell">
+                  Telefone
+                </th>
+                <th className="hidden px-4 py-3 font-medium lg:table-cell">
                   Campanha
                 </th>
                 <th className="hidden px-4 py-3 font-medium xl:table-cell">
                   Anúncio
                 </th>
-                <th className="hidden px-4 py-3 font-medium lg:table-cell">
+                <th className="hidden w-24 px-4 py-3 font-medium xl:table-cell">
                   Data
                 </th>
-                <th className="hidden px-4 py-3 font-medium sm:table-cell">
+                <th className="hidden w-32 px-4 py-3 font-medium sm:table-cell">
                   Status
                 </th>
-                <th className="hidden px-4 py-3 font-medium sm:table-cell">
+                <th className="hidden w-28 px-4 py-3 font-medium sm:table-cell">
                   Disparo
                 </th>
               </tr>
@@ -218,7 +220,7 @@ export function LeadList({
                     }`}
                   >
                     <td
-                      className="px-4 py-3"
+                      className="px-3 py-3 sm:px-4"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <input
@@ -230,7 +232,7 @@ export function LeadList({
                         className="size-4 accent-[#8b5cf6] disabled:opacity-30"
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 sm:px-4">
                       <div className="flex items-center gap-2.5">
                         <span className="grid size-7 shrink-0 place-items-center rounded-full bg-accent-2/15 text-[#c4b5fd]">
                           <User className="size-3.5" />
@@ -256,17 +258,17 @@ export function LeadList({
                         </div>
                       </div>
                     </td>
-                    <td className="tnum px-4 py-3 text-muted">
+                    <td className="tnum hidden truncate px-4 py-3 text-muted md:table-cell">
                       {lead.phone ?? "—"}
                     </td>
-                    <td className="hidden max-w-[200px] truncate px-4 py-3 text-muted md:table-cell">
+                    <td className="hidden truncate px-4 py-3 text-muted lg:table-cell">
                       {lead.campaign_name ?? "—"}
                     </td>
-                    <td className="hidden max-w-[200px] truncate px-4 py-3 text-muted xl:table-cell">
+                    <td className="hidden truncate px-4 py-3 text-muted xl:table-cell">
                       {lead.ad_name ?? "—"}
                     </td>
-                    <td className="hidden whitespace-nowrap px-4 py-3 text-muted lg:table-cell">
-                      {lead.created_time ? formatDate(lead.created_time) : "—"}
+                    <td className="hidden truncate whitespace-nowrap px-4 py-3 text-muted xl:table-cell">
+                      {lead.created_time ? formatDateShort(lead.created_time) : "—"}
                     </td>
                     <td className="hidden px-4 py-3 sm:table-cell">
                       {lead.conversou ? (
@@ -294,9 +296,14 @@ export function LeadList({
                                 }`
                               : undefined
                           }
+                          className="max-w-full"
                         >
-                          <Send className="size-3" />
-                          {lead.enviadoEm ? formatDate(lead.enviadoEm) : "Enviado"}
+                          <Send className="size-3 shrink-0" />
+                          <span className="truncate">
+                            {lead.enviadoEm
+                              ? formatDateShort(lead.enviadoEm)
+                              : "Enviado"}
+                          </span>
                         </Badge>
                       ) : (
                         <span className="text-muted-2">—</span>

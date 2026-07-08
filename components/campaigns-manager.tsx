@@ -5,7 +5,9 @@ import {
   Megaphone,
   Plus,
   X,
+  Pencil,
   Trash2,
+  Save,
   Loader2,
   AlertTriangle,
   User,
@@ -15,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   createCampaign,
+  updateCampaign,
   deleteCampaign,
   type Campaign,
   type ApprovedTemplate,
@@ -43,7 +46,9 @@ export function CampaignsManager({
   templates: ApprovedTemplate[];
   sendEnabled: boolean;
 }) {
-  const [creating, setCreating] = React.useState(false);
+  const [modal, setModal] = React.useState<
+    { mode: "create" } | { mode: "edit"; campaign: Campaign } | null
+  >(null);
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
 
@@ -63,7 +68,7 @@ export function CampaignsManager({
           Salve template + variáveis uma vez e reuse no disparo, sem redigitar.
         </p>
         <button
-          onClick={() => setCreating(true)}
+          onClick={() => setModal({ mode: "create" })}
           disabled={!sendEnabled}
           title={
             sendEnabled
@@ -119,18 +124,30 @@ export function CampaignsManager({
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDelete(c.id)}
-                  disabled={pending && deletingId === c.id}
-                  aria-label="Excluir campanha"
-                  className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-2 transition-colors hover:bg-destructive/15 hover:text-[#f87171] disabled:opacity-40"
-                >
-                  {pending && deletingId === c.id ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="size-4" />
-                  )}
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => setModal({ mode: "edit", campaign: c })}
+                    disabled={!sendEnabled}
+                    aria-label="Editar campanha"
+                    title="Editar"
+                    className="grid size-8 place-items-center rounded-lg text-muted-2 transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-40"
+                  >
+                    <Pencil className="size-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(c.id)}
+                    disabled={pending && deletingId === c.id}
+                    aria-label="Excluir campanha"
+                    title="Excluir"
+                    className="grid size-8 place-items-center rounded-lg text-muted-2 transition-colors hover:bg-destructive/15 hover:text-[#f87171] disabled:opacity-40"
+                  >
+                    {pending && deletingId === c.id ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {c.body ? (
@@ -150,29 +167,55 @@ export function CampaignsManager({
         </div>
       )}
 
-      {creating ? (
-        <CreateCampaignModal
+      {modal ? (
+        <CampaignFormModal
           slug={slug}
           templates={templates}
-          onClose={() => setCreating(false)}
+          mode={modal.mode}
+          campaign={modal.mode === "edit" ? modal.campaign : null}
+          onClose={() => setModal(null)}
         />
       ) : null}
     </>
   );
 }
 
-function CreateCampaignModal({
+function seedShared(
+  campaign: Campaign,
+  templates: ApprovedTemplate[],
+): string[] {
+  const tpl = templates.find((t) => t.name === campaign.templateName);
+  const varCount = tpl?.varCount ?? campaign.vars.length + 1;
+  const need = Math.max(0, varCount - 1);
+  const arr = Array(need).fill("");
+  campaign.vars.forEach((v, i) => {
+    if (i < need) arr[i] = v;
+  });
+  return arr;
+}
+
+function CampaignFormModal({
   slug,
   templates,
+  mode,
+  campaign,
   onClose,
 }: {
   slug: string;
   templates: ApprovedTemplate[];
+  mode: "create" | "edit";
+  campaign: Campaign | null;
   onClose: () => void;
 }) {
-  const [name, setName] = React.useState("");
-  const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
-  const [shared, setShared] = React.useState<string[]>([]);
+  const isEdit = mode === "edit" && campaign !== null;
+
+  const [name, setName] = React.useState(isEdit ? campaign!.name : "");
+  const [tplName, setTplName] = React.useState(
+    isEdit ? campaign!.templateName : (templates[0]?.name ?? ""),
+  );
+  const [shared, setShared] = React.useState<string[]>(() =>
+    isEdit ? seedShared(campaign!, templates) : [],
+  );
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -180,8 +223,14 @@ function CreateCampaignModal({
   const varCount = tpl?.varCount ?? 0;
   const sharedNeeded = Math.max(0, varCount - 1);
 
+  // Só reseta as variáveis quando o template REALMENTE muda (não no mount,
+  // para preservar os valores já preenchidos ao editar).
+  const prevTpl = React.useRef(tplName);
   React.useEffect(() => {
-    setShared(Array(sharedNeeded).fill(""));
+    if (prevTpl.current !== tplName) {
+      prevTpl.current = tplName;
+      setShared(Array(sharedNeeded).fill(""));
+    }
     setError(null);
   }, [tplName, sharedNeeded]);
 
@@ -212,13 +261,16 @@ function CreateCampaignModal({
     }
     setSaving(true);
     setError(null);
-    const res = await createCampaign(slug, {
+    const payload = {
       name: name.trim(),
       templateName: tpl.name,
       lang: tpl.language,
       vars: shared.slice(0, sharedNeeded),
       body: tpl.body,
-    });
+    };
+    const res = isEdit
+      ? await updateCampaign(slug, campaign!.id, payload)
+      : await createCampaign(slug, payload);
     setSaving(false);
     if (res.ok) onClose();
     else setError(res.error ?? "Não foi possível salvar.");
@@ -242,7 +294,9 @@ function CreateCampaignModal({
               <Megaphone className="size-5" />
             </span>
             <div>
-              <h2 className="text-base font-semibold">Nova campanha</h2>
+              <h2 className="text-base font-semibold">
+                {isEdit ? "Editar campanha" : "Nova campanha"}
+              </h2>
               <p className="text-xs text-muted">
                 Template + variáveis salvos para reuso
               </p>
@@ -373,6 +427,11 @@ function CreateCampaignModal({
               <>
                 <Loader2 className="size-4 animate-spin" />
                 Salvando…
+              </>
+            ) : isEdit ? (
+              <>
+                <Save className="size-4" />
+                Salvar alterações
               </>
             ) : (
               <>
