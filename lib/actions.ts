@@ -354,6 +354,20 @@ export type Campaign = {
   createdAt: string | null;
 };
 
+// Lê template_vars de forma robusta: aceita array (formato novo) OU string
+// JSON dupla-codificada (formato antigo/bugado). Nunca lança.
+function parseVars(raw: unknown): string[] {
+  let v: unknown = raw;
+  for (let i = 0; i < 3 && typeof v === "string"; i++) {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      break;
+    }
+  }
+  return Array.isArray(v) ? v.map((x) => String(x)) : [];
+}
+
 async function ensureCampaignsTable(): Promise<void> {
   await sql.unsafe(
     `create table if not exists public.campaigns (
@@ -406,7 +420,7 @@ export async function createCampaign(
         name,
         data.templateName,
         data.lang || "pt_BR",
-        JSON.stringify(vars),
+        vars,
         data.body ?? "",
       ],
     );
@@ -453,7 +467,7 @@ export async function updateCampaign(
         name,
         data.templateName,
         data.lang || "pt_BR",
-        JSON.stringify(vars),
+        vars,
         data.body ?? "",
       ],
     );
@@ -490,9 +504,7 @@ export async function listCampaigns(slug: string): Promise<Campaign[]> {
       name: r.name ?? "Campanha",
       templateName: r.template_name ?? "",
       templateLang: r.template_lang ?? "pt_BR",
-      vars: Array.isArray(r.template_vars)
-        ? (r.template_vars as unknown[]).map((v) => String(v))
-        : [],
+      vars: parseVars(r.template_vars),
       body: r.template_body ?? "",
       createdAt: r.created_at,
     }));
@@ -551,9 +563,7 @@ export async function dispatchCampaign(
     );
     if (!row?.template_name) return fail("Campanha não encontrada.");
 
-    const vars = Array.isArray(row.template_vars)
-      ? (row.template_vars as unknown[]).map((v) => String(v))
-      : [];
+    const vars = parseVars(row.template_vars);
     // varCount = 1 (nome) + variáveis compartilhadas salvas.
     const varCount = 1 + vars.length;
 
