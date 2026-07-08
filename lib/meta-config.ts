@@ -20,3 +20,19 @@ const CONFIG: Record<string, MetaAgentConfig> = {
 export function getMetaConfig(slug: string): MetaAgentConfig | null {
   return CONFIG[slug] ?? null;
 }
+
+// Fonte de leads por agente — evita misturar dados entre agentes no dashboard.
+export type LeadSource =
+  | { leadSource: "form"; pageId: string }
+  | { leadSource: "outreach" }
+  | { leadSource: "none" };
+
+const LEAD_SOURCE: Record<string, LeadSource> = {
+  agente24horas: { leadSource: "form", pageId: "109902140539351" },
+  casaldotrafego: { leadSource: "outreach" },
+  drlucas: { leadSource: "none" },
+};
+
+export function getLeadSource(slug: string): LeadSource {
+  return LEAD_SOURCE[slug] ?? { leadSource: "none" };
+}

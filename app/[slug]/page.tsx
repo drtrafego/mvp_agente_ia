@@ -84,11 +84,17 @@ export default async function OverviewPage({
         <KpiRow d={d} />
         <FunnelSection d={d} />
         <TimelineSection d={d} todayStr={todayStr} />
-        <AdRankingSection rows={d.adRanking} />
-        <div className="grid gap-5 lg:grid-cols-2">
-          <PlatformSection d={d} />
-          <CampaignSection d={d} />
-        </div>
+        {d.sourceKind === "form" ? (
+          <>
+            <AdRankingSection rows={d.adRanking} />
+            <div className="grid gap-5 lg:grid-cols-2">
+              <PlatformSection d={d} />
+              <CampaignSection d={d} />
+            </div>
+          </>
+        ) : d.sourceKind === "outreach" ? (
+          <OutreachChannelSection d={d} />
+        ) : null}
         <BotHealthSection d={d} />
         <InsightsSection d={d} />
         <RecentSection slug={slug} rows={d.recent} />
@@ -133,17 +139,17 @@ function KpiRow({ d }: { d: DashboardData }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
       <KpiCard
-        label="Taxa de conversa"
+        label={d.sourceKind === "outreach" ? "Taxa de resposta" : "Taxa de conversa"}
         value={formatPct(taxaCur)}
         icon={<Target className="size-4" />}
         featured
         delta={pctDelta(taxaCur, taxaPrev)}
         hint={`${formatNumber(d.conversaram.current)} de ${formatNumber(
           d.leads.current,
-        )} leads`}
+        )} ${d.labels.leads.toLowerCase()}`}
       />
       <KpiCard
-        label="Leads"
+        label={d.labels.leads}
         value={formatNumber(d.leads.current)}
         icon={<Users className="size-4" />}
         tone="secondary"
@@ -186,22 +192,35 @@ function KpiRow({ d }: { d: DashboardData }) {
 
 /* ---- 2. Funil ---- */
 function FunnelSection({ d }: { d: DashboardData }) {
-  const steps = [
-    { label: "Leads", value: d.leads.current, color: "bg-secondary", soon: false },
-    {
-      label: "Conversaram",
-      value: d.conversaram.current,
-      color: "bg-accent-2",
-      soon: false,
-    },
-    {
-      label: "Engajaram (4+ msgs)",
-      value: d.engajaram,
-      color: "bg-success",
-      soon: false,
-    },
-    { label: "Agendaram", value: d.agendaram, color: "bg-muted-2", soon: true },
-  ];
+  const isOutreach = d.sourceKind === "outreach";
+  const steps = isOutreach
+    ? [
+        { label: d.labels.leads, value: d.leads.current, color: "bg-secondary", soon: false },
+        {
+          label: d.labels.conversaram,
+          value: d.conversaram.current,
+          color: "bg-accent-2",
+          soon: false,
+        },
+        { label: "Engajaram", value: 0, color: "bg-success", soon: true },
+        { label: "Agendaram", value: 0, color: "bg-muted-2", soon: true },
+      ]
+    : [
+        { label: d.labels.leads, value: d.leads.current, color: "bg-secondary", soon: false },
+        {
+          label: d.labels.conversaram,
+          value: d.conversaram.current,
+          color: "bg-accent-2",
+          soon: false,
+        },
+        {
+          label: "Engajaram (4+ msgs)",
+          value: d.engajaram,
+          color: "bg-success",
+          soon: false,
+        },
+        { label: "Agendaram", value: d.agendaram, color: "bg-muted-2", soon: true },
+      ];
   const base = Math.max(steps[0].value, 1);
 
   return (
@@ -209,7 +228,11 @@ function FunnelSection({ d }: { d: DashboardData }) {
       <SectionHead
         icon={<Target className="size-4 text-secondary" />}
         title="Funil de conversão"
-        subtitle="Do lead capturado ao agendamento"
+        subtitle={
+          isOutreach
+            ? "Do disparo à resposta do lead"
+            : "Do lead capturado ao agendamento"
+        }
       />
       <div className="mt-4 space-y-2.5">
         {steps.map((s, i) => {
@@ -264,10 +287,10 @@ function TimelineSection({
       <SectionHead
         icon={<TrendingUp className="size-4 text-secondary" />}
         title="Evolução no tempo"
-        subtitle="Leads e conversas por dia"
+        subtitle={`${d.labels.leads} e conversas por dia`}
         legend={
           <div className="flex items-center gap-3 text-[11px] text-muted">
-            <LegendDot color="#3b82f6" label="Leads" />
+            <LegendDot color="#3b82f6" label={d.labels.leads} />
             <LegendDot color="#8b5cf6" label="Conversas" />
           </div>
         }
@@ -416,6 +439,35 @@ function CampaignSection({ d }: { d: DashboardData }) {
         ) : (
           <p className="py-8 text-center text-sm text-muted-2">
             Sem campanhas no período.
+          </p>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/* ---- 5b. Prospecção por canal (fonte outreach) ---- */
+function OutreachChannelSection({ d }: { d: DashboardData }) {
+  return (
+    <Card glass className="p-5">
+      <SectionHead
+        icon={<Radio className="size-4 text-secondary" />}
+        title="Disparos por canal"
+        subtitle="Distribuição da prospecção entre WhatsApp e e-mail"
+      />
+      <div className="mt-4">
+        {d.outreachByChannel.length ? (
+          <CategoryDonut
+            data={d.outreachByChannel.map((x) => ({
+              key: x.channel,
+              value: x.value,
+              label: channelLabel(x.channel),
+            }))}
+            unit="disparos"
+          />
+        ) : (
+          <p className="py-8 text-center text-sm text-muted-2">
+            Sem disparos no período.
           </p>
         )}
       </div>
@@ -654,17 +706,20 @@ function buildInsights(d: DashboardData): Insight[] {
   const taxa =
     d.leads.current > 0 ? (d.conversaram.current / d.leads.current) * 100 : 0;
 
+  const noun = d.labels.leads;
+  const nounLow = noun.toLowerCase();
+
   if (leadsDelta !== null && leadsDelta <= -15) {
     out.push({
       kind: "bad",
-      text: `Leads caíram ${Math.abs(
+      text: `${noun} caíram ${Math.abs(
         Math.round(leadsDelta),
-      )}% vs o período anterior. Reveja verba e criativos.`,
+      )}% vs o período anterior. Vale revisar a fonte.`,
     });
   } else if (leadsDelta !== null && leadsDelta >= 15) {
     out.push({
       kind: "good",
-      text: `Leads subiram ${Math.round(
+      text: `${noun} subiram ${Math.round(
         leadsDelta,
       )}% vs o período anterior. Bom momento para escalar.`,
     });
@@ -696,9 +751,10 @@ function buildInsights(d: DashboardData): Insight[] {
   if (d.leads.current >= 5 && taxa < 30) {
     out.push({
       kind: "warn",
-      text: `Só ${formatPct(
-        taxa,
-      )} dos leads iniciam conversa. Dispare um template de 1º toque na página Leads.`,
+      text:
+        d.sourceKind === "outreach"
+          ? `Só ${formatPct(taxa)} dos ${nounLow} responderam. Teste outro template ou horário de disparo.`
+          : `Só ${formatPct(taxa)} dos ${nounLow} iniciam conversa. Dispare um template de 1º toque na página Leads.`,
     });
   }
 
