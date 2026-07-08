@@ -1,43 +1,108 @@
 import Link from "next/link";
-import { MessagesSquare, Inbox, UserSearch } from "lucide-react";
+import { MessagesSquare, Inbox, UserSearch, MessageCircle, Mail } from "lucide-react";
 import {
-  getConversations,
+  getBotConversations,
   getConversation,
   getMessages,
   getLeadForConversation,
+  getOutreachConvos,
+  getOutreachConvo,
+  getOutreachMessages,
+  type ConvChannel,
+  type ConvOrigin,
 } from "@/lib/queries";
 import { Badge } from "@/components/ui";
-import { ChannelIcon } from "@/components/channel-icon";
 import { ChatView } from "@/components/chat-view";
+import { OutreachChat } from "@/components/outreach-chat";
 import { LeadCard } from "@/components/lead-card";
 import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
 import { getMetaConfig } from "@/lib/meta-config";
-import { cn } from "@/lib/utils";
-import { channelLabel, formatNumber, timeAgo } from "@/lib/utils";
+import { cn, formatNumber, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+
+const ORIGIN_TONE: Record<ConvOrigin, "secondary" | "violet" | "neutral"> = {
+  Anúncio: "secondary",
+  Prospecção: "violet",
+  Direto: "neutral",
+};
+
+type ListItem = {
+  key: string;
+  kind: "bot" | "outreach";
+  href: string;
+  active: boolean;
+  title: string;
+  handle: string | null;
+  origin: ConvOrigin;
+  date: string | null;
+  count: number | null;
+};
 
 export default async function ConversasPage({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ c?: string }>;
+  searchParams: Promise<{ c?: string; o?: string; ch?: string }>;
 }) {
   const { slug } = await params;
-  const { c } = await searchParams;
+  const { c, o, ch: chParam } = await searchParams;
+  const ch: ConvChannel = chParam === "email" ? "email" : "whatsapp";
 
-  const conversations = await getConversations(slug);
-  const selected = c ? await getConversation(slug, c) : null;
-  const messages = selected ? await getMessages(slug, selected.session_id) : [];
-  const paused = selected?.chat_id ? await getPausedChatIds(slug) : [];
-  const isPaused = selected?.chat_id
-    ? paused.includes(selected.chat_id)
+  const [botConvos, outreachConvos] = await Promise.all([
+    getBotConversations(slug, ch),
+    getOutreachConvos(slug, ch),
+  ]);
+
+  const selectedBot = c ? await getConversation(slug, c) : null;
+  const selectedOutreach = o ? await getOutreachConvo(slug, o) : null;
+  const anySelected = !!(selectedBot || selectedOutreach);
+
+  // Dados só do que estiver selecionado.
+  const messages = selectedBot
+    ? await getMessages(slug, selectedBot.session_id)
+    : [];
+  const paused = selectedBot?.chat_id ? await getPausedChatIds(slug) : [];
+  const isPaused = selectedBot?.chat_id
+    ? paused.includes(selectedBot.chat_id)
     : false;
-  const lead = selected ? await getLeadForConversation(selected) : null;
+  const lead = selectedBot ? await getLeadForConversation(selectedBot) : null;
   const sendEnabled = !!getMetaConfig(slug);
   const templates =
-    selected && sendEnabled ? await getApprovedTemplates(slug) : [];
+    selectedBot && sendEnabled ? await getApprovedTemplates(slug) : [];
+  const outreachMessages = selectedOutreach
+    ? await getOutreachMessages(selectedOutreach.id)
+    : [];
+
+  const items: ListItem[] = [
+    ...botConvos.map((cv) => ({
+      key: `b-${cv.session_id}`,
+      kind: "bot" as const,
+      href: `/${slug}/conversas?ch=${ch}&c=${encodeURIComponent(cv.session_id)}`,
+      active: selectedBot?.session_id === cv.session_id,
+      title: cv.title ?? "Conversa sem título",
+      handle: cv.chat_id,
+      origin: cv.origin,
+      date: cv.started_at,
+      count: cv.message_count,
+    })),
+    ...outreachConvos.map((oc) => ({
+      key: `o-${oc.id}`,
+      kind: "outreach" as const,
+      href: `/${slug}/conversas?ch=${ch}&o=${encodeURIComponent(oc.id)}`,
+      active: selectedOutreach?.id === oc.id,
+      title: oc.lead_name ?? oc.lead_handle ?? "Lead",
+      handle: oc.lead_handle,
+      origin: "Prospecção" as ConvOrigin,
+      date: oc.last_at,
+      count: oc.msg_count,
+    })),
+  ].sort((a, b) => {
+    const da = a.date ? new Date(a.date).getTime() : 0;
+    const db = b.date ? new Date(b.date).getTime() : 0;
+    return db - da;
+  });
 
   return (
     <div className="animate-fade-in flex h-[calc(100dvh-3.5rem)] flex-col gap-3 p-3 sm:p-4 lg:h-dvh">
@@ -46,61 +111,57 @@ export default async function ConversasPage({
           Conversas
         </h1>
         <span className="text-xs text-muted">
-          {formatNumber(conversations.length)} atendimentos
+          {formatNumber(items.length)} nesta aba
         </span>
       </div>
+
+      <ChannelTabs slug={slug} ch={ch} />
 
       <div className="flex min-h-0 flex-1 gap-3">
         {/* ---- Lista ---- */}
         <aside
           className={cn(
             "flex min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft lg:w-80 xl:w-[22rem]",
-            selected && "hidden lg:flex",
+            anySelected && "hidden lg:flex",
           )}
         >
-          {conversations.length === 0 ? (
-            <EmptyList />
+          {items.length === 0 ? (
+            <EmptyList channel={ch} />
           ) : (
             <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
-              {conversations.map((conv) => {
-                const active = selected?.session_id === conv.session_id;
-                return (
-                  <Link
-                    key={conv.session_id}
-                    href={`/${slug}/conversas?c=${encodeURIComponent(conv.session_id)}`}
-                    scroll={false}
-                    className={cn(
-                      "block rounded-xl border p-3 transition-all duration-150",
-                      active
-                        ? "border-secondary/40 bg-gradient-to-r from-secondary/15 to-accent-2/10 ring-1 ring-inset ring-secondary/25"
-                        : "border-transparent hover:border-border hover:bg-surface-2",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium">
-                        {conv.title ?? "Conversa sem título"}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-muted-2">
-                        {timeAgo(conv.started_at)}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 flex items-center gap-2 text-xs text-muted">
-                      <Badge tone="neutral">
-                        <ChannelIcon channel={conv.channel} />
-                        {channelLabel(conv.channel)}
-                      </Badge>
-                      <span className="tnum truncate">
-                        {conv.chat_id ?? "sem contato"}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-[11px] text-muted-2">
-                      <span className="tnum">
-                        {formatNumber(conv.message_count ?? 0)} mensagens
-                      </span>
-                    </div>
-                  </Link>
-                );
-              })}
+              {items.map((it) => (
+                <Link
+                  key={it.key}
+                  href={it.href}
+                  scroll={false}
+                  className={cn(
+                    "block rounded-xl border p-3 transition-all duration-150",
+                    it.active
+                      ? "border-secondary/40 bg-gradient-to-r from-secondary/15 to-accent-2/10 ring-1 ring-inset ring-secondary/25"
+                      : "border-transparent hover:border-border hover:bg-surface-2",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">
+                      {it.title}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-2">
+                      {timeAgo(it.date)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-muted">
+                    <Badge tone={ORIGIN_TONE[it.origin]}>{it.origin}</Badge>
+                    <span className="tnum truncate">
+                      {it.handle ?? "sem contato"}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[11px] text-muted-2">
+                    <span className="tnum">
+                      {formatNumber(it.count ?? 0)} mensagens
+                    </span>
+                  </div>
+                </Link>
+              ))}
             </div>
           )}
         </aside>
@@ -109,10 +170,10 @@ export default async function ConversasPage({
         <section
           className={cn(
             "min-h-0 flex-1 flex-col gap-3",
-            selected ? "flex" : "hidden lg:flex",
+            anySelected ? "flex" : "hidden lg:flex",
           )}
         >
-          {selected ? (
+          {selectedBot ? (
             <>
               {lead ? (
                 <div className="shrink-0 xl:hidden">
@@ -122,7 +183,7 @@ export default async function ConversasPage({
               <div className="min-h-0 flex-1">
                 <ChatView
                   slug={slug}
-                  conversation={selected}
+                  conversation={selectedBot}
                   messages={messages}
                   isPaused={isPaused}
                   sendEnabled={sendEnabled}
@@ -130,22 +191,57 @@ export default async function ConversasPage({
                 />
               </div>
             </>
+          ) : selectedOutreach ? (
+            <div className="min-h-0 flex-1">
+              <OutreachChat
+                slug={slug}
+                ch={ch}
+                convo={selectedOutreach}
+                messages={outreachMessages}
+              />
+            </div>
           ) : (
             <Placeholder />
           )}
         </section>
 
-        {/* ---- Painel do lead (desktop largo) ---- */}
-        {selected ? (
+        {/* ---- Painel do lead (só bot, desktop largo) ---- */}
+        {selectedBot ? (
           <aside className="hidden min-h-0 w-[20rem] shrink-0 overflow-y-auto xl:block">
-            {lead ? (
-              <LeadCard lead={lead} />
-            ) : (
-              <NoAttribution />
-            )}
+            {lead ? <LeadCard lead={lead} /> : <NoAttribution />}
           </aside>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function ChannelTabs({ slug, ch }: { slug: string; ch: ConvChannel }) {
+  const tabs: { key: ConvChannel; label: string; icon: React.ReactNode }[] = [
+    { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle className="size-4" /> },
+    { key: "email", label: "E-mail", icon: <Mail className="size-4" /> },
+  ];
+  return (
+    <div className="flex w-full shrink-0 gap-1 rounded-xl border border-border bg-surface-2/60 p-1 sm:w-auto sm:self-start">
+      {tabs.map((t) => {
+        const active = t.key === ch;
+        return (
+          <Link
+            key={t.key}
+            href={`/${slug}/conversas?ch=${t.key}`}
+            scroll={false}
+            className={cn(
+              "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors sm:flex-none",
+              active
+                ? "brand-gradient text-white"
+                : "text-muted hover:text-fg",
+            )}
+          >
+            {t.icon}
+            {t.label}
+          </Link>
+        );
+      })}
     </div>
   );
 }
@@ -178,14 +274,24 @@ function NoAttribution() {
   );
 }
 
-function EmptyList() {
+function EmptyList({ channel }: { channel: ConvChannel }) {
   return (
     <div className="grid flex-1 place-items-center p-10 text-center">
       <div>
-        <Inbox className="mx-auto mb-3 size-8 text-muted-2" />
-        <p className="font-medium">Nenhuma conversa ainda</p>
+        {channel === "email" ? (
+          <Mail className="mx-auto mb-3 size-8 text-muted-2" />
+        ) : (
+          <Inbox className="mx-auto mb-3 size-8 text-muted-2" />
+        )}
+        <p className="font-medium">
+          {channel === "email"
+            ? "Nenhuma conversa de e-mail"
+            : "Nenhuma conversa ainda"}
+        </p>
         <p className="mt-1 text-sm text-muted">
-          Este agente ainda não registrou atendimentos.
+          {channel === "email"
+            ? "Não há atendimentos nem prospecção por e-mail para este agente."
+            : "Este agente ainda não registrou atendimentos."}
         </p>
       </div>
     </div>

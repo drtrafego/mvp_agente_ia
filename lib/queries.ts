@@ -168,6 +168,127 @@ export async function getConversation(
   return row ?? null;
 }
 
+// Conversas do bot com tag de origem + prospecção (Minerador) -----------
+
+export type ConvOrigin = "Anúncio" | "Direto" | "Prospecção";
+export type ConvChannel = "whatsapp" | "email";
+
+export type BotConvRow = ConversationRow & { origin: ConvOrigin };
+
+/**
+ * Conversas do bot (Hermes) do canal pedido, com tag de origem:
+ * "Anúncio" quando o telefone casa com um lead de meta_leads, senão "Direto".
+ * whatsapp = tudo que não é e-mail; email = channel que contém "mail".
+ */
+export async function getBotConversations(
+  slug: string,
+  channel: ConvChannel,
+): Promise<BotConvRow[]> {
+  const schema = safeSchema(slug);
+  const channelFilter =
+    channel === "email"
+      ? "where c.channel ilike '%mail%'"
+      : "where coalesce(c.channel, '') not ilike '%mail%'";
+  try {
+    const rows = await sql.unsafe<(ConversationRow & { origin: string })[]>(
+      `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
+              c.ended_at, c.message_count, c.cost_usd,
+              case when exists (
+                select 1 from public.meta_leads l
+                where l.phone_norm is not null and l.phone_norm <> '' and (
+                  regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+                  or (length(l.phone_norm) >= 8
+                      and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                          = right(l.phone_norm, 8))
+                )
+              ) then 'Anúncio' else 'Direto' end as origin
+       from "${schema}".conversations c
+       ${channelFilter}
+       order by coalesce(c.started_at, c.ended_at) desc nulls last`,
+    );
+    return rows.map((r) => ({
+      ...r,
+      origin: (r.origin === "Anúncio" ? "Anúncio" : "Direto") as ConvOrigin,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export type OutreachConvo = {
+  id: string;
+  agent_slug: string;
+  channel: string;
+  source: string;
+  lead_name: string | null;
+  lead_handle: string | null;
+  lead_company: string | null;
+  status: string | null;
+  last_at: string | null;
+  msg_count: number | null;
+};
+
+export type OutreachMsg = {
+  id: string;
+  convo_id: string;
+  direction: string;
+  status: string | null;
+  subject: string | null;
+  body: string | null;
+  sent_at: string | null;
+};
+
+const OUTREACH_COLS = `id, agent_slug, channel, source, lead_name, lead_handle,
+                       lead_company, status, last_at, msg_count`;
+
+export async function getOutreachConvos(
+  slug: string,
+  channel: ConvChannel,
+): Promise<OutreachConvo[]> {
+  try {
+    return await sql.unsafe<OutreachConvo[]>(
+      `select ${OUTREACH_COLS} from public.outreach_convos
+       where agent_slug = $1 and channel = $2
+       order by last_at desc nulls last`,
+      [slug, channel],
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function getOutreachConvo(
+  slug: string,
+  id: string,
+): Promise<OutreachConvo | null> {
+  try {
+    const [row] = await sql.unsafe<OutreachConvo[]>(
+      `select ${OUTREACH_COLS} from public.outreach_convos
+       where id = $1 and agent_slug = $2 limit 1`,
+      [id, slug],
+    );
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getOutreachMessages(
+  convoId: string,
+): Promise<OutreachMsg[]> {
+  try {
+    return await sql.unsafe<OutreachMsg[]>(
+      `select id, convo_id, direction, status, subject, body, sent_at
+       from public.outreach_msgs
+       where convo_id = $1
+       order by sent_at asc nulls last`,
+      [convoId],
+    );
+  } catch {
+    return [];
+  }
+}
+
 // Atribuição de lead (Meta Lead Ads) ----------------------------------
 
 export type LeadField = { name: string; values: string[] };
