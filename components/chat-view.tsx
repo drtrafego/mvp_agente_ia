@@ -2,11 +2,10 @@ import Link from "next/link";
 import { ArrowLeft, Bot, User, DollarSign, FileText } from "lucide-react";
 import type { ConversationRow, MessageRow } from "@/lib/queries";
 import type { ApprovedTemplate } from "@/lib/actions";
-import { Badge } from "./ui";
 import { ChannelIcon } from "./channel-icon";
 import { ChatControls } from "./chat-controls";
 import { cleanMessage, type MediaItem } from "@/lib/clean-content";
-import { channelLabel, formatDateTime, formatUSD } from "@/lib/utils";
+import { formatDateTime, formatUSD } from "@/lib/utils";
 
 export function ChatView({
   slug,
@@ -34,18 +33,17 @@ export function ChatView({
         >
           <ArrowLeft className="size-4" />
         </Link>
+        <div className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-3 text-muted">
+          <ChannelIcon channel={conversation.channel} className="size-4" />
+        </div>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-semibold">
+          <h2 className="truncate font-semibold leading-tight">
             {conversation.title ?? "Conversa sem título"}
           </h2>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
-            <Badge tone="secondary">
-              <ChannelIcon channel={conversation.channel} />
-              {channelLabel(conversation.channel)}
-            </Badge>
-            <span className="tnum">{conversation.chat_id ?? "sem contato"}</span>
-            <span className="text-muted-2">·</span>
-            <span>{formatDateTime(conversation.started_at)}</span>
+          <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+            <span className="tnum truncate">
+              {conversation.chat_id ?? "sem contato"}
+            </span>
           </div>
         </div>
         <div className="hidden shrink-0 items-center gap-1 rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs text-muted sm:flex">

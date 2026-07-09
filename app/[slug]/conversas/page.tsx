@@ -10,6 +10,7 @@ import {
   getOutreachMessages,
   type ConvChannel,
   type ConvOrigin,
+  type ConvFilter,
 } from "@/lib/queries";
 import { Badge } from "@/components/ui";
 import { ChatView } from "@/components/chat-view";
@@ -44,15 +45,22 @@ export default async function ConversasPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ c?: string; o?: string; ch?: string }>;
+  searchParams: Promise<{
+    c?: string;
+    o?: string;
+    ch?: string;
+    f?: string;
+  }>;
 }) {
   const { slug } = await params;
-  const { c, o, ch: chParam } = await searchParams;
+  const { c, o, ch: chParam, f: fParam } = await searchParams;
   const ch: ConvChannel = chParam === "email" ? "email" : "whatsapp";
+  const filter: ConvFilter =
+    fParam === "ativas24h" || fParam === "responderam" ? fParam : "all";
 
   const [botConvos, outreachConvos] = await Promise.all([
-    getBotConversations(slug, ch),
-    getOutreachConvos(slug, ch),
+    getBotConversations(slug, ch, filter),
+    getOutreachConvos(slug, ch, filter),
   ]);
 
   const selectedBot = c ? await getConversation(slug, c) : null;
@@ -75,11 +83,12 @@ export default async function ConversasPage({
     ? await getOutreachMessages(selectedOutreach.id)
     : [];
 
+  const fq = filter !== "all" ? `&f=${filter}` : "";
   const items: ListItem[] = [
     ...botConvos.map((cv) => ({
       key: `b-${cv.session_id}`,
       kind: "bot" as const,
-      href: `/${slug}/conversas?ch=${ch}&c=${encodeURIComponent(cv.session_id)}`,
+      href: `/${slug}/conversas?ch=${ch}${fq}&c=${encodeURIComponent(cv.session_id)}`,
       active: selectedBot?.session_id === cv.session_id,
       title: cv.title ?? "Conversa sem título",
       handle: cv.chat_id,
@@ -90,7 +99,7 @@ export default async function ConversasPage({
     ...outreachConvos.map((oc) => ({
       key: `o-${oc.id}`,
       kind: "outreach" as const,
-      href: `/${slug}/conversas?ch=${ch}&o=${encodeURIComponent(oc.id)}`,
+      href: `/${slug}/conversas?ch=${ch}${fq}&o=${encodeURIComponent(oc.id)}`,
       active: selectedOutreach?.id === oc.id,
       title: oc.lead_name ?? oc.lead_handle ?? "Lead",
       handle: oc.lead_handle,
@@ -115,7 +124,10 @@ export default async function ConversasPage({
         </span>
       </div>
 
-      <ChannelTabs slug={slug} ch={ch} />
+      <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <ChannelTabs slug={slug} ch={ch} filter={filter} />
+        <FilterChips slug={slug} ch={ch} filter={filter} />
+      </div>
 
       <div className="flex min-h-0 flex-1 gap-3">
         {/* ---- Lista ---- */}
@@ -174,23 +186,16 @@ export default async function ConversasPage({
           )}
         >
           {selectedBot ? (
-            <>
-              {lead ? (
-                <div className="shrink-0 xl:hidden">
-                  <LeadCard lead={lead} />
-                </div>
-              ) : null}
-              <div className="min-h-0 flex-1">
-                <ChatView
-                  slug={slug}
-                  conversation={selectedBot}
-                  messages={messages}
-                  isPaused={isPaused}
-                  sendEnabled={sendEnabled}
-                  templates={templates}
-                />
-              </div>
-            </>
+            <div className="min-h-0 flex-1">
+              <ChatView
+                slug={slug}
+                conversation={selectedBot}
+                messages={messages}
+                isPaused={isPaused}
+                sendEnabled={sendEnabled}
+                templates={templates}
+              />
+            </div>
           ) : selectedOutreach ? (
             <div className="min-h-0 flex-1">
               <OutreachChat
@@ -216,19 +221,28 @@ export default async function ConversasPage({
   );
 }
 
-function ChannelTabs({ slug, ch }: { slug: string; ch: ConvChannel }) {
+function ChannelTabs({
+  slug,
+  ch,
+  filter,
+}: {
+  slug: string;
+  ch: ConvChannel;
+  filter: ConvFilter;
+}) {
+  const fq = filter !== "all" ? `&f=${filter}` : "";
   const tabs: { key: ConvChannel; label: string; icon: React.ReactNode }[] = [
     { key: "whatsapp", label: "WhatsApp", icon: <MessageCircle className="size-4" /> },
     { key: "email", label: "E-mail", icon: <Mail className="size-4" /> },
   ];
   return (
-    <div className="flex w-full shrink-0 gap-1 rounded-xl border border-border bg-surface-2/60 p-1 sm:w-auto sm:self-start">
+    <div className="flex w-full shrink-0 gap-1 rounded-xl border border-border bg-surface-2/60 p-1 sm:w-auto">
       {tabs.map((t) => {
         const active = t.key === ch;
         return (
           <Link
             key={t.key}
-            href={`/${slug}/conversas?ch=${t.key}`}
+            href={`/${slug}/conversas?ch=${t.key}${fq}`}
             scroll={false}
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors sm:flex-none",
@@ -239,6 +253,45 @@ function ChannelTabs({ slug, ch }: { slug: string; ch: ConvChannel }) {
           >
             {t.icon}
             {t.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function FilterChips({
+  slug,
+  ch,
+  filter,
+}: {
+  slug: string;
+  ch: ConvChannel;
+  filter: ConvFilter;
+}) {
+  const chips: { key: ConvFilter; label: string }[] = [
+    { key: "all", label: "Todas" },
+    { key: "ativas24h", label: "Ativas 24h" },
+    { key: "responderam", label: "Responderam" },
+  ];
+  return (
+    <div className="flex w-full shrink-0 gap-1 overflow-x-auto sm:w-auto">
+      {chips.map((chip) => {
+        const active = chip.key === filter;
+        const fq = chip.key !== "all" ? `&f=${chip.key}` : "";
+        return (
+          <Link
+            key={chip.key}
+            href={`/${slug}/conversas?ch=${ch}${fq}`}
+            scroll={false}
+            className={cn(
+              "shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              active
+                ? "border-transparent brand-gradient text-white"
+                : "border-border bg-surface-2/60 text-muted hover:text-fg",
+            )}
+          >
+            {chip.label}
           </Link>
         );
       })}

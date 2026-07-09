@@ -173,6 +173,7 @@ export async function getConversation(
 
 export type ConvOrigin = "Anúncio" | "Direto" | "Prospecção";
 export type ConvChannel = "whatsapp" | "email";
+export type ConvFilter = "all" | "ativas24h" | "responderam";
 
 export type BotConvRow = ConversationRow & { origin: ConvOrigin };
 
@@ -180,16 +181,26 @@ export type BotConvRow = ConversationRow & { origin: ConvOrigin };
  * Conversas do bot (Hermes) do canal pedido, com tag de origem:
  * "Anúncio" quando o telefone casa com um lead de meta_leads, senão "Direto".
  * whatsapp = tudo que não é e-mail; email = channel que contém "mail".
+ * filter:
+ *  - ativas24h: última mensagem do lead (role='user') <= 24h atrás.
+ *  - responderam: lead com 2+ mensagens (engajou, respondeu o bot).
  */
 export async function getBotConversations(
   slug: string,
   channel: ConvChannel,
+  filter: ConvFilter = "all",
 ): Promise<BotConvRow[]> {
   const schema = safeSchema(slug);
-  const channelFilter =
+  const conds: string[] = [
     channel === "email"
-      ? "where c.channel ilike '%mail%'"
-      : "where coalesce(c.channel, '') not ilike '%mail%'";
+      ? "c.channel ilike '%mail%'"
+      : "coalesce(c.channel, '') not ilike '%mail%'",
+  ];
+  if (filter === "ativas24h") {
+    conds.push("mm.last_user_ts >= now() - interval '24 hours'");
+  } else if (filter === "responderam") {
+    conds.push("coalesce(mm.user_count, 0) >= 2");
+  }
   try {
     const rows = await sql.unsafe<(ConversationRow & { origin: string })[]>(
       `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
@@ -208,7 +219,12 @@ export async function getBotConversations(
                   and (m.content ilike '%vim%anúncio%' or m.content ilike '%vim%anuncio%')
               ) then 'Anúncio' else 'Direto' end as origin
        from "${schema}".conversations c
-       ${channelFilter}
+       left join lateral (
+         select max(m.ts) filter (where m.role = 'user') as last_user_ts,
+                count(*) filter (where m.role = 'user') as user_count
+         from "${schema}".messages m where m.session_id = c.session_id
+       ) mm on true
+       where ${conds.join(" and ")}
        order by coalesce(c.started_at, c.ended_at) desc nulls last`,
     );
     return rows.map((r) => ({
@@ -249,12 +265,20 @@ const OUTREACH_COLS = `id, agent_slug, channel, source, lead_name, lead_handle,
 export async function getOutreachConvos(
   slug: string,
   channel: ConvChannel,
+  filter: ConvFilter = "all",
 ): Promise<OutreachConvo[]> {
+  const extra =
+    filter === "ativas24h"
+      ? "and oc.last_at >= now() - interval '24 hours'"
+      : filter === "responderam"
+        ? `and exists (select 1 from public.outreach_msgs m
+                       where m.convo_id = oc.id and m.direction = 'inbound')`
+        : "";
   try {
     return await sql.unsafe<OutreachConvo[]>(
-      `select ${OUTREACH_COLS} from public.outreach_convos
-       where agent_slug = $1 and channel = $2
-       order by last_at desc nulls last`,
+      `select ${OUTREACH_COLS} from public.outreach_convos oc
+       where oc.agent_slug = $1 and oc.channel = $2 ${extra}
+       order by oc.last_at desc nulls last`,
       [slug, channel],
     );
   } catch {
