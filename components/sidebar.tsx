@@ -8,6 +8,7 @@ import {
   MessagesSquare,
   MessageSquareText,
   Megaphone,
+  Send,
   Users,
   KanbanSquare,
   Sparkles,
@@ -47,6 +48,11 @@ function buildNav(slug: string): NavItem[] {
       href: `/${slug}/campaigns`,
       label: "Campanhas",
       icon: <Megaphone className="size-[18px]" />,
+    },
+    {
+      href: `/${slug}/disparos`,
+      label: "Disparos",
+      icon: <Send className="size-[18px]" />,
     },
     {
       href: `/${slug}/pipeline`,

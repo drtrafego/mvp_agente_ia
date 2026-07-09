@@ -579,3 +579,242 @@ export async function dispatchCampaign(
     return fail("Erro inesperado no disparo da campanha.");
   }
 }
+
+// ---- Disparos programados / agendados + auto-recuperação ------------
+
+export type ScheduledDispatch = {
+  id: string;
+  campaignId: string | null;
+  templateName: string;
+  templateLang: string;
+  vars: string[];
+  kind: "selected" | "auto_aguardando";
+  targetPhones: string[];
+  scheduledAt: string | null;
+  status: string;
+  enabled: boolean;
+  createdAt: string | null;
+  ranAt: string | null;
+  result: string | null;
+};
+
+export type AutoRecovery = { enabled: boolean; campaignId: string | null } | null;
+
+function toStrArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x)) : [];
+}
+
+async function ensureScheduledTable(): Promise<void> {
+  await sql.unsafe(
+    `create table if not exists public.scheduled_dispatches (
+       id text primary key,
+       agent_slug text,
+       campaign_id text,
+       template_name text,
+       template_lang text,
+       template_vars jsonb,
+       kind text,
+       target_phones jsonb,
+       scheduled_at timestamptz,
+       status text,
+       enabled boolean default true,
+       created_at timestamptz default now(),
+       ran_at timestamptz,
+       result text
+     )`,
+  );
+  await sql.unsafe(
+    `create index if not exists scheduled_dispatches_agent_status_idx
+       on public.scheduled_dispatches (agent_slug, status)`,
+  );
+}
+
+export async function createScheduledDispatch(
+  slug: string,
+  input: {
+    campaignId?: string | null;
+    templateName: string;
+    lang: string;
+    vars: string[];
+    phones: string[];
+    scheduledAt: string | null;
+  },
+): Promise<ActionResult> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    if (!getMetaConfig(slug))
+      return { ok: false, error: "Agente sem número de WhatsApp oficial." };
+    if (!input.templateName)
+      return { ok: false, error: "Selecione um template ou campanha." };
+    const phones = (input.phones ?? [])
+      .map((p) => String(p).replace(/\D/g, ""))
+      .filter(Boolean);
+    if (phones.length === 0)
+      return { ok: false, error: "Nenhum lead selecionado." };
+
+    await ensureScheduledTable();
+    const id = `${slug}:sd:${Date.now()}:${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const scheduledAt = input.scheduledAt ?? new Date().toISOString();
+    const vars = (input.vars ?? []).map((v) => v.trim());
+
+    await sql`
+      insert into public.scheduled_dispatches
+        (id, agent_slug, campaign_id, template_name, template_lang,
+         template_vars, kind, target_phones, scheduled_at, status, enabled, created_at)
+      values (${id}, ${slug}, ${input.campaignId ?? null}, ${input.templateName},
+              ${input.lang || "pt_BR"}, ${sql.json(vars)}, 'selected',
+              ${sql.json(phones)}, ${scheduledAt}, 'pending', true, now())
+    `;
+    revalidatePath(`/${slug}/disparos`);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro inesperado ao programar o disparo." };
+  }
+}
+
+export async function listScheduledDispatches(
+  slug: string,
+): Promise<ScheduledDispatch[]> {
+  try {
+    if (!getAgent(slug)) return [];
+    const rows = await sql.unsafe<
+      {
+        id: string;
+        campaign_id: string | null;
+        template_name: string | null;
+        template_lang: string | null;
+        template_vars: unknown;
+        kind: string | null;
+        target_phones: unknown;
+        scheduled_at: string | null;
+        status: string | null;
+        enabled: boolean | null;
+        created_at: string | null;
+        ran_at: string | null;
+        result: string | null;
+      }[]
+    >(
+      `select id, campaign_id, template_name, template_lang, template_vars,
+              kind, target_phones, scheduled_at, status, enabled, created_at,
+              ran_at, result
+       from public.scheduled_dispatches
+       where agent_slug = $1
+       order by created_at desc nulls last`,
+      [slug],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      campaignId: r.campaign_id,
+      templateName: r.template_name ?? "",
+      templateLang: r.template_lang ?? "pt_BR",
+      vars: toStrArray(r.template_vars),
+      kind: r.kind === "auto_aguardando" ? "auto_aguardando" : "selected",
+      targetPhones: toStrArray(r.target_phones),
+      scheduledAt: r.scheduled_at,
+      status: r.status ?? "pending",
+      enabled: !!r.enabled,
+      createdAt: r.created_at,
+      ranAt: r.ran_at,
+      result: r.result,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function cancelScheduledDispatch(
+  slug: string,
+  id: string,
+): Promise<ActionResult> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    if (!id) return { ok: false, error: "Disparo inválido." };
+    await sql.unsafe(
+      `update public.scheduled_dispatches set status = 'canceled'
+       where id = $1 and agent_slug = $2 and status = 'pending' and kind = 'selected'`,
+      [id, slug],
+    );
+    revalidatePath(`/${slug}/disparos`);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro ao cancelar o disparo." };
+  }
+}
+
+export async function getAutoRecovery(slug: string): Promise<AutoRecovery> {
+  try {
+    if (!getAgent(slug)) return null;
+    const [row] = await sql.unsafe<
+      { enabled: boolean | null; campaign_id: string | null }[]
+    >(
+      `select enabled, campaign_id from public.scheduled_dispatches
+       where id = $1 and kind = 'auto_aguardando' limit 1`,
+      [`${slug}:auto_aguardando`],
+    );
+    return row
+      ? { enabled: !!row.enabled, campaignId: row.campaign_id }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setAutoRecovery(
+  slug: string,
+  input: { enabled: boolean; campaignId: string },
+): Promise<ActionResult> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    if (input.enabled && !input.campaignId)
+      return {
+        ok: false,
+        error: "Escolha uma campanha para a auto-recuperação.",
+      };
+    await ensureScheduledTable();
+
+    // Snapshot do template da campanha ligada.
+    let tplName = "";
+    let tplLang = "pt_BR";
+    let vars: string[] = [];
+    if (input.campaignId) {
+      const [c] = await sql.unsafe<
+        {
+          template_name: string | null;
+          template_lang: string | null;
+          template_vars: unknown;
+        }[]
+      >(
+        `select template_name, template_lang, template_vars
+         from public.campaigns where id = $1 and agent_slug = $2 limit 1`,
+        [input.campaignId, slug],
+      );
+      if (c) {
+        tplName = c.template_name ?? "";
+        tplLang = c.template_lang ?? "pt_BR";
+        vars = toStrArray(c.template_vars);
+      }
+    }
+
+    const id = `${slug}:auto_aguardando`;
+    await sql`
+      insert into public.scheduled_dispatches
+        (id, agent_slug, campaign_id, template_name, template_lang, template_vars,
+         kind, target_phones, scheduled_at, status, enabled, created_at)
+      values (${id}, ${slug}, ${input.campaignId || null}, ${tplName}, ${tplLang},
+              ${sql.json(vars)}, 'auto_aguardando', ${sql.json([])}, null,
+              'pending', ${input.enabled}, now())
+      on conflict (id) do update set
+        campaign_id = excluded.campaign_id,
+        template_name = excluded.template_name,
+        template_lang = excluded.template_lang,
+        template_vars = excluded.template_vars,
+        enabled = excluded.enabled
+    `;
+    revalidatePath(`/${slug}/disparos`);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro ao atualizar a auto-recuperação." };
+  }
+}

@@ -19,6 +19,7 @@ import {
   ClipboardList,
   Rocket,
   Send,
+  CalendarClock,
   LayoutTemplate,
   Loader2,
   AlertTriangle,
@@ -28,6 +29,7 @@ import type { FormLead } from "@/lib/queries";
 import {
   sendTemplateToLeads,
   dispatchCampaign,
+  createScheduledDispatch,
   type ApprovedTemplate,
   type OutreachSummary,
   type Campaign,
@@ -92,6 +94,7 @@ export function LeadList({
   const [detail, setDetail] = React.useState<FormLead | null>(null);
   const [sel, setSel] = React.useState<Set<string>>(new Set());
   const [campaignOpen, setCampaignOpen] = React.useState(false);
+  const [scheduleOpen, setScheduleOpen] = React.useState(false);
 
   const aguardando = React.useMemo(
     () => leads.filter((l) => !l.conversou && l.phone_norm),
@@ -139,7 +142,7 @@ export function LeadList({
             <span className="font-medium">{sel.size}</span> selecionado
             {sel.size > 1 ? "s" : ""}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setSel(new Set())}
               className="rounded-lg px-3 py-1.5 text-xs text-muted transition-colors hover:text-fg"
@@ -147,17 +150,30 @@ export function LeadList({
               Limpar
             </button>
             <button
+              onClick={() => setScheduleOpen(true)}
+              disabled={!sendEnabled}
+              title={
+                sendEnabled
+                  ? "Programar/agendar disparo"
+                  : "Este agente não tem número de WhatsApp oficial"
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface-2 px-3.5 py-1.5 text-sm font-medium text-fg transition-colors hover:bg-surface-3 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CalendarClock className="size-4" />
+              Programar
+            </button>
+            <button
               onClick={() => setCampaignOpen(true)}
               disabled={!sendEnabled}
               title={
                 sendEnabled
-                  ? "Disparar template"
+                  ? "Disparar template agora"
                   : "Este agente não tem número de WhatsApp oficial"
               }
               className="brand-gradient inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Rocket className="size-4" />
-              Disparar template
+              Disparar agora
             </button>
           </div>
         </div>
@@ -334,6 +350,20 @@ export function LeadList({
           }}
         />
       ) : null}
+
+      {scheduleOpen ? (
+        <ScheduleModal
+          slug={slug}
+          templates={templates}
+          campaigns={campaigns}
+          targets={targets}
+          onClose={() => setScheduleOpen(false)}
+          onDone={() => {
+            setScheduleOpen(false);
+            setSel(new Set());
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -349,6 +379,340 @@ function fillPreview(
     const v = sharedParams[n - 2];
     return v && v.trim() ? v : `{{${n}}}`;
   });
+}
+
+function ScheduleModal({
+  slug,
+  templates,
+  campaigns,
+  targets,
+  onClose,
+  onDone,
+}: {
+  slug: string;
+  templates: ApprovedTemplate[];
+  campaigns: Campaign[];
+  targets: { phone: string; name: string }[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [mode, setMode] = React.useState<"saved" | "avulso">(
+    campaigns.length > 0 ? "saved" : "avulso",
+  );
+  const [campaignId, setCampaignId] = React.useState(campaigns[0]?.id ?? "");
+  const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
+  const [shared, setShared] = React.useState<string[]>([]);
+  const [when, setWhen] = React.useState<"now" | "schedule">("now");
+  const [datetime, setDatetime] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [okMsg, setOkMsg] = React.useState<string | null>(null);
+
+  const tpl = templates.find((t) => t.name === tplName) ?? null;
+  const varCount = tpl?.varCount ?? 0;
+  const sharedNeeded = Math.max(0, varCount - 1);
+  const campaign = campaigns.find((c) => c.id === campaignId) ?? null;
+
+  React.useEffect(() => {
+    setShared(Array(sharedNeeded).fill(""));
+  }, [tplName, sharedNeeded]);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose, saving]);
+
+  const missingVars =
+    mode === "avulso" &&
+    sharedNeeded > 0 &&
+    shared.slice(0, sharedNeeded).some((v) => !v.trim());
+
+  async function salvar() {
+    if (saving) return;
+    if (when === "schedule" && !datetime) {
+      setError("Escolha a data e hora do agendamento.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+
+    const payload =
+      mode === "saved"
+        ? campaign
+          ? {
+              campaignId: campaign.id,
+              templateName: campaign.templateName,
+              lang: campaign.templateLang,
+              vars: campaign.vars,
+            }
+          : null
+        : tpl
+          ? {
+              campaignId: null,
+              templateName: tpl.name,
+              lang: tpl.language,
+              vars: shared.slice(0, sharedNeeded),
+            }
+          : null;
+
+    if (!payload) {
+      setSaving(false);
+      setError("Selecione uma campanha ou template.");
+      return;
+    }
+
+    const scheduledAt =
+      when === "schedule" ? new Date(datetime).toISOString() : null;
+
+    const res = await createScheduledDispatch(slug, {
+      ...payload,
+      phones: targets.map((t) => t.phone),
+      scheduledAt,
+    });
+    setSaving(false);
+    if (res.ok) {
+      setOkMsg(
+        when === "now"
+          ? "Disparo criado — entra na fila e o robô envia em seguida."
+          : "Disparo agendado com sucesso.",
+      );
+      setTimeout(onDone, 1400);
+    } else {
+      setError(res.error ?? "Não foi possível programar.");
+    }
+  }
+
+  return (
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-fade-in"
+          onClick={() => (saving ? null : onClose())}
+        />
+        <div className="relative flex max-h-[100dvh] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-border glass-2 shadow-soft animate-fade-up sm:max-h-[90dvh] sm:rounded-2xl">
+          <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+            <div className="flex items-center gap-3">
+              <span className="grid size-10 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
+                <CalendarClock className="size-5" />
+              </span>
+              <div>
+                <h2 className="text-base font-semibold">Programar disparo</h2>
+                <p className="text-xs text-muted">
+                  {targets.length} lead{targets.length > 1 ? "s" : ""} selecionado
+                  {targets.length > 1 ? "s" : ""}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => (saving ? null : onClose())}
+              disabled={saving}
+              aria-label="Fechar"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-2 transition-colors hover:bg-surface-2 hover:text-fg disabled:opacity-40"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+            {campaigns.length > 0 ? (
+              <div className="flex rounded-lg border border-border bg-surface-2/60 p-0.5 text-xs font-medium">
+                <button
+                  onClick={() => setMode("saved")}
+                  className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+                    mode === "saved"
+                      ? "brand-gradient text-white"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  Campanha salva
+                </button>
+                <button
+                  onClick={() => setMode("avulso")}
+                  className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+                    mode === "avulso"
+                      ? "brand-gradient text-white"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  Avulso
+                </button>
+              </div>
+            ) : null}
+
+            {mode === "saved" ? (
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted">
+                  Campanha salva
+                </label>
+                <div className="relative">
+                  <Megaphone className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
+                  <select
+                    value={campaignId}
+                    onChange={(e) => setCampaignId(e.target.value)}
+                    className="w-full appearance-none rounded-lg border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm text-fg outline-none focus:border-secondary/50"
+                  >
+                    {campaigns.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {campaign?.body ? (
+                  <p className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-sm text-muted">
+                    {fillPreview(
+                      campaign.body,
+                      targets[0]?.name?.trim() || "cliente",
+                      campaign.vars,
+                    )}
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium text-muted">
+                    Template aprovado
+                  </label>
+                  {templates.length === 0 ? (
+                    <p className="rounded-lg border border-border bg-surface-2/60 px-3 py-2.5 text-xs text-muted-2">
+                      Nenhum template aprovado disponível.
+                    </p>
+                  ) : (
+                    <div className="relative">
+                      <LayoutTemplate className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
+                      <select
+                        value={tplName}
+                        onChange={(e) => setTplName(e.target.value)}
+                        className="w-full appearance-none rounded-lg border border-border bg-surface-2 py-2.5 pl-9 pr-3 text-sm text-fg outline-none focus:border-secondary/50"
+                      >
+                        {templates.map((t) => (
+                          <option key={`${t.name}-${t.language}`} value={t.name}>
+                            {t.name} ({t.language})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                {sharedNeeded > 0 ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: sharedNeeded }).map((_, idx) => (
+                      <div key={idx}>
+                        <label className="mb-1 block text-xs font-medium text-muted">
+                          Variável {idx + 2} {`{{${idx + 2}}}`}
+                        </label>
+                        <input
+                          value={shared[idx] ?? ""}
+                          onChange={(e) =>
+                            setShared((prev) => {
+                              const next = [...prev];
+                              next[idx] = e.target.value;
+                              return next;
+                            })
+                          }
+                          placeholder={`Conteúdo da variável ${idx + 2}`}
+                          className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            )}
+
+            {/* Quando */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted">
+                Quando enviar
+              </label>
+              <div className="flex rounded-lg border border-border bg-surface-2/60 p-0.5 text-xs font-medium">
+                <button
+                  onClick={() => setWhen("now")}
+                  className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+                    when === "now"
+                      ? "brand-gradient text-white"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  Enviar agora
+                </button>
+                <button
+                  onClick={() => setWhen("schedule")}
+                  className={`flex-1 rounded-md px-3 py-1.5 transition-colors ${
+                    when === "schedule"
+                      ? "brand-gradient text-white"
+                      : "text-muted hover:text-fg"
+                  }`}
+                >
+                  Agendar
+                </button>
+              </div>
+              {when === "schedule" ? (
+                <input
+                  type="datetime-local"
+                  value={datetime}
+                  onChange={(e) => setDatetime(e.target.value)}
+                  className="mt-2 w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none focus:border-secondary/50"
+                />
+              ) : (
+                <p className="mt-2 text-[11px] text-muted-2">
+                  Entra na fila e o robô envia na próxima execução.
+                </p>
+              )}
+            </div>
+
+            {error ? (
+              <p className="flex items-center gap-1.5 text-xs text-[#f87171]">
+                <AlertTriangle className="size-3.5 shrink-0" />
+                {error}
+              </p>
+            ) : okMsg ? (
+              <p className="flex items-center gap-1.5 text-xs text-[#4ade80]">
+                <CheckCircle2 className="size-3.5 shrink-0" />
+                {okMsg}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="border-t border-border p-4">
+            <button
+              onClick={salvar}
+              disabled={
+                saving ||
+                targets.length === 0 ||
+                (mode === "saved" ? !campaign : !tpl || missingVars)
+              }
+              className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Salvando…
+                </>
+              ) : (
+                <>
+                  <CalendarClock className="size-4" />
+                  {when === "now" ? "Colocar na fila" : "Agendar disparo"}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
 }
 
 function CampaignModal({
