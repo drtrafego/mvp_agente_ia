@@ -202,6 +202,10 @@ export async function getBotConversations(
                       and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
                           = right(l.phone_norm, 8))
                 )
+              ) or exists (
+                select 1 from "${schema}".messages m
+                where m.session_id = c.session_id and m.role = 'user'
+                  and (m.content ilike '%vim%anúncio%' or m.content ilike '%vim%anuncio%')
               ) then 'Anúncio' else 'Direto' end as origin
        from "${schema}".conversations c
        ${channelFilter}
