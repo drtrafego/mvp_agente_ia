@@ -1,92 +1,141 @@
 ========================================================================
 CONTEXTO DO PROJETO — AGENTES IA (SAC no WhatsApp/e-mail com Hermes)
-Handoff pra uma nova sessão de Claude Code. Atualizado 10/07/2026.
+Handoff completo pra nova sessão de Claude Code. Atualizado 10/07/2026.
+Este doc NÃO é "como instalar Hermes" (a sessão nova já sabe). É o CATÁLOGO das
+configurações, ajustes finos, patches e gotchas que descobrimos e aplicamos — o que
+economiza semanas e ninguém precisa ficar lembrando.
 ========================================================================
 
-# LEIA ISTO PRIMEIRO — ARQUITETURA EM 2 FASES
-- FASE ATUAL (este servidor): 3 agentes JUNTOS num VPS só, compartilhando 1 Neon e 1 dashboard.
-  Foi o começo/MVP. As specifics abaixo (números, page_id, tokens, wa_router) são DESTE servidor.
-- MODELO NOVO (decidido): cada cliente novo fica SOLO no SEU PRÓPRIO servidor (1 container Hermes,
-  1 número, e o seu próprio banco/dashboard). NÃO replicar a bagunça multi-tenant deste VPS.
-  Use a PARTE B como molde. A PARTE A é referência de como o primeiro ambiente funciona.
+# ARQUITETURA EM 2 FASES (leia primeiro)
+- FASE ATUAL (este servidor): 3 agentes juntos num VPS, dividindo 1 Neon e 1 dashboard. MVP.
+- MODELO NOVO: cada cliente novo SOLO no próprio servidor (1 container, 1 número, seu banco/dashboard).
+Produto: agente de IA que ATENDE no WhatsApp/e-mail 24h — qualifica, contorna objeção, AGENDA na Google
+Agenda. Motor = Hermes (Nous Research) em Docker. Cockpit = dashboard Next.js no Vercel (fora do motor).
 
-O que é o produto: agente de IA que ATENDE no WhatsApp (e e-mail) 24h — qualifica lead, contorna
-objeção, AGENDA na Google Agenda. Motor = Hermes (Nous Research) self-hospedado em Docker.
-Cockpit = dashboard Next.js no Vercel que MONITORA/CONTROLA (fica FORA do Hermes).
-
-========================================================================
-PARTE A — ESTE SERVIDOR (prod atual, MULTI-AGENTE) — específico daqui
-========================================================================
-3 containers no VPS (/opt/hermes/hermesN_<cliente>/data -> /opt/data, bind rw):
-- hermes1_agente24horas — persona NINA. Produto "Agente24Horas". WhatsApp +55 11 99668-1596
-  (phone_id 115216611574100). Campanha de FORMULÁRIO Meta, página Amanda Felix 109902140539351.
-- hermes3_casaldotrafego — persona AMANDA. Agência de tráfego. WhatsApp +55 66 9209-8891
-  (phone_id 414594695067374) + e-mail Brevo (oportunidade@casaldotrafego.email). Recebe prospecção do Minerador.
-- hermes2_drlucas — Dr. Lucas (dermato). WhatsApp dele ainda sem credencial Meta. Google Agenda DELE
-  conectada via OAuth (10/07).
-Os 2 números oficiais estão no MESMO app Meta (917411172673844) -> dividem 1 webhook -> ROTEADOR
-wa_router (por phone_id) em hermes.casaldotrafego.com/whatsapp/webhook. (Isso é gambiarra de multi-tenant;
-cliente solo NÃO precisa de roteador — webhook vai direto pro container dele.)
-
-Neon central (1 só, compartilhado): schema por agente (conversations+messages) + tabelas public.*
-(meta_leads, outreach_convos/msgs, campaigns, outreach_sent, scheduled_dispatches).
-Dashboard (1 só, multi-agente): agente-ia.casaldotrafego.com, repo github.com/drtrafego/mvp_agente_ia,
-lê os 3 do Neon central. Vercel auto-deploy no push. Envs: DATABASE_URL, DASHBOARD_PASSWORD,
-PAINEL_API_TOKEN, DISPATCH_CRON_SECRET.
-Orquestração/crons no VPS: /opt/gastaomatos/hermes/ (central-db sync 5min, meta-leads, dispatch-cron 10min,
-agente_painel = control API pra pausar/responder, minerador, docs/, CLAUDE.md control-plane).
+# OS 3 AGENTES DESTE SERVIDOR
+- hermes1_agente24horas — NINA. WhatsApp +55 11 99668-1596 (phone_id 115216611574100). Form ad Meta
+  (página Amanda Felix 109902140539351).
+- hermes3_casaldotrafego — AMANDA. WhatsApp +55 66 9209-8891 (phone_id 414594695067374) + e-mail Brevo. Prospecção do Minerador.
+- hermes2_drlucas — Dr. Lucas (dermato). Google Agenda dele conectada (OAuth). WhatsApp dele pendente (falta credencial Meta).
+2 números no mesmo app Meta (917411172673844) -> 1 webhook -> roteador wa_router por phone_id. Cliente solo NÃO precisa de roteador.
 
 ========================================================================
-PARTE B — MOLDE DE CLIENTE NOVO (SOLO, no servidor próprio dele)
+CONFIGURAÇÕES E MELHORIAS JÁ APLICADAS NO BOT (o ouro — replicar em cliente novo)
 ========================================================================
-Cada cliente = 1 servidor isolado. Passos (referência; há tooling no VPS atual em
-/opt/gastaomatos/hermes: skills provisionar-cliente-hermes/criar-agente-hermes + PLAYBOOK-CLIENTE-NOVO-SAC.txt):
-1) 1 container Hermes com a imagem hermes-agent-sac:latest (já traz: faster-whisper, trava de travessão,
-   echo-off, grace de rajada, patch de sessão de e-mail). Volume /opt/data = HERMES_HOME.
-2) WhatsApp: Cloud API OFICIAL do cliente (hermes whatsapp-cloud). Como é solo, o webhook da Meta aponta
-   DIRETO pro container (sem wa_router). Portões a abrir: WHATSAPP_CLOUD_ALLOW_ALL_USERS=true,
-   HOME_CHANNEL, gateway_restart_notification=false.
-3) Persona: montar o SOUL.md (/opt/data/SOUL.md) com o negócio do cliente. Travas obrigatórias:
-   anti-invenção (não prometer ligação/retorno humano; não inventar horário sem rodar calendar list),
-   não abrir links, sem travessão, só responder com base na base de conhecimento. Testar: hermes chat -q "<msg>".
-4) Google Agenda: usar SERVICE ACCOUNT (o cliente compartilha a agenda dele com o email do robô
-   @projeto.iam.gserviceaccount.com, permissão "Fazer alterações nos eventos" — igual add usuário no Analytics).
-   Lib google.oauth2.service_account já instalada; FALTA adaptar google_api.py p/ autenticar via chave JSON.
-   (Dr. Lucas ficou no OAuth por ser o primeiro; novos = service account.)
-5) E-mail (opcional): Brevo (MCP send + Inbound Parsing webhook) se o cliente for atender e-mail.
-6) Dashboard: decidir 1-por-cliente (deploy próprio lendo o Neon/DB dele) OU multi-tenant. Hoje é 1 só;
-   pra cliente solo o certo é o dashboard apontar pro banco DAQUELE cliente.
+
+## MODELO & IMAGEM
+- Modelo: deepseek/deepseek-v4-flash (OpenRouter, chave no /opt/data/.env). É barato/fraco em ferramenta —
+  se um agente inventar demais mesmo com as travas, considerar subir o modelo.
+- Imagem: hermes-agent-sac:latest (base hermes-agent + patches BAKED). Dockerfile em /opt/gastaomatos/hermes/sac-image/.
+  RECRIAR o container preserva os patches (estão na imagem); config/env/SOUL/modelo ficam no volume /opt/data.
+
+## TRANSCRIÇÃO DE ÁUDIO (voz do lead -> texto)
+- faster-whisper instalado (uv pip na venv; baked na imagem SAC). config.yaml stt.local:
+  enabled=true, provider=local, model=SMALL, language='pt'. (model 'base' ALUCINAVA — small+pt acerta.)
+- HF_HOME=/opt/data/.cache/hf (volume) -> modelo persiste em recriar, só re-instala o pacote.
+- ECHO da transcrição suprimido: o gateway ecoava "🎙️ ..." pro cliente. Patch no whatsapp_cloud.send
+  (e bridge.js no Baileys) suprime msg que começa com 🎙️. (Baked na imagem SAC.)
+
+## RAJADA DE MENSAGENS (lead manda várias linhas/áudios -> 1 resposta só, esperando juntar)
+- config.yaml display.busy_input_mode = STEER (injeta a 2ª msg na resposta em andamento -> 1 resposta,
+  não 2). Opções nativas: interrupt(default)/queue/steer.
+- GRACE (espera X seg juntando msgs antes de responder): o grace nativo é só Telegram; estendi pro
+  WhatsApp com patch_grace_whatsapp.py + HERMES_..._FOLLOWUP_GRACE_SECONDS=8 no .env.
+- config.yaml display.busy_ack_enabled = false (some o "Queued for the next turn").
+
+## TRAVA DE TRAVESSÃO (—)  [regra do dono: proibido em texto público]
+- O modelo INSISTE em gerar "—" mesmo com SOUL limpo. Virou TRAVA no código: patch_no_travessao.py
+  (baked na SAC) troca —/–/―/‒/− por vírgula ANTES de enviar, em 2 pontos: whatsapp_cloud.send (WhatsApp)
+  e send_transac_email (e-mail Brevo). A narração interna ainda tem —, mas NÃO chega ao cliente.
+
+## PORTÕES DE ATENDIMENTO (todo bot de SAC novo)
+- WHATSAPP_CLOUD_ALLOW_ALL_USERS=true (atende qualquer número; senão pede "pairing code").
+- WHATSAPP_CLOUD_HOME_CHANNEL=<numero do dono> (+_NAME) — cala o prompt "no home channel set".
+- config.yaml gateway_restart_notification=false no adapter (não spamma "Gateway shutting down" no dono a cada restart).
+
+## GOOGLE AGENDA
+- skill google-workspace (calendar list/create/update/delete). create/update PATCHADOS com sendUpdates="all"
+  (dispara o convite pro e-mail do lead). Comando roda com /opt/hermes/.venv/bin/python (tem as libs google).
+- config.yaml platform_toolsets: webhook -> [hermes-webhook, terminal]  (SEM o terminal a sessão de E-MAIL
+  não roda o google_api.py -> e-mail não agendava; com isso, agenda pelos 2 canais).
+- Fuso -03:00 OBRIGATÓRIO no start/end (senão "Missing time zone").
+- Auth: OAuth (google_client_secret.json + google_token.json; token chown hermes:hermes senão o gateway não lê)
+  OU Service Account (modelo dos NOVOS clientes: cliente compartilha a agenda com o email @...iam.gserviceaccount.com,
+  permissão "Fazer alterações nos eventos", igual Analytics). Lib service_account instalada; FALTA adaptar google_api.py.
+
+## E-MAIL BREVO (só casaldotrafego)
+- ENVIO: MCP oficial da Brevo (hermes mcp add brevo, token MCP base64). tools.include PODADO p/ 4 tools
+  (send_transac_email + contacts create/update/get) — 282 tools distraíam o bot.
+- RECEBE: Brevo Inbound Parsing -> URL secreta no nginx -> container brevo_signer (calcula HMAC-SHA256) ->
+  webhook do Hermes (rota brevo-email). patch_webhook_session.py: mesmo remetente = 1 sessão (senão cada e-mail
+  virava conversa nova). Sender público: oportunidade@casaldotrafego.email (domínio autenticado DKIM na Brevo).
+
+## SOUL / PERSONA (regras de comportamento — no /opt/data/SOUL.md, recarrega por msg, sem restart)
+- Anti-invenção: só oferece horário que veio do calendar list REAL naquela conversa; NUNCA promete ligação/
+  retorno humano ("o comercial vai ligar"); nunca inventa escassez ("agenda cheia"); nunca inventa link.
+- NÃO abrir/acessar links que o lead manda (Nina gastou 87s tentando abrir um Instagram).
+- Sem travessão; PT com acento; msgs curtas (~300 chars, 1 ideia); 1 pergunta por vez.
+- Fluxo de venda: qualifica -> contorna objeção -> TRIAL CLOSE ("isso faz sentido pro seu caso?") -> agenda.
+  Lead quente ("quero fechar") pula direto pro agendamento. Pede nome/email só APÓS o "sim".
+- Janela de agendamento: seg-sex, 10h-15h. Preço: ancora no custo de um funcionário CLT, sem inventar número.
+- IMPORTANTE: depois de corrigir comportamento, RESETAR a conversa de teste (hermes sessions delete) —
+  o histórico ruim contamina (o modelo imita o próprio passado > regra do SOUL).
+- Testar comportamento SEM WhatsApp: docker exec <container> /opt/hermes/.venv/bin/hermes chat -q "<msg do lead>".
+
+## GOTCHA DE PERSISTÊNCIA (crítico)
+- Patches de CORE (whatsapp_cloud.py, webhook.py) SOMEM em recriar container -> por isso estão BAKED na
+  imagem hermes-agent-sac. Se rebuildar a imagem BASE, re-aplicar: patch_no_travessao, patch_grace_whatsapp,
+  patch_webhook_session, patch_gcal_full, patch_pause_cloud (control API). Scripts em /opt/gastaomatos/hermes/.
 
 ========================================================================
-REGRAS DE OURO (universais, valem sempre)
+DASHBOARD (mvp_agente_ia) — features prontas
 ========================================================================
-- NUNCA misturar dados de clientes (cada um isolado: banco/tabela/página/allowlist).
-- NUNCA travessão (—) em texto público (trava no código troca por vírgula).
-- Deliverables em .txt, salvos na pasta do projeto. Atualizar doc/memória EXISTENTE, nunca duplicar.
-- Não apagar histórico/conversas reais; só dados de teste que EU criei.
-- SOUL com as travas (anti-invenção, não abrir links). Testar comportamento com hermes chat -q.
+- Visão geral CIENTE DO AGENTE (getLeadSource): form (funil Leads->Conversaram, meta_leads por page_id) /
+  outreach (Disparos->Responderam) / none.
+- Conversas: abas WhatsApp/E-mail + filtro Todas/Ativas24h/Responderam + tag de origem (Anúncio/Prospecção/
+  Direto). Conversa aberta estilo WhatsApp. Pausar/responder via control API (PAINEL_API_TOKEN).
+- Leads (tabela table-fixed + disparar + Programar), Mensagens (templates), Campanhas (criar/editar/disparar;
+  vars = ARRAY jsonb via sql.json, NUNCA JSON.stringify -> senão dupla-codifica e some ao editar).
+- Disparos: programável/agendado + Auto-recuperação (toggle OFF). Motor lib/dispatch-runner.ts, rota
+  /api/dispatch/run (DISPATCH_CRON_SECRET), cron VPS dispatch-cron/run.sh 10min. Dedupe por outreach_sent.
+- Neon central: schema por agente (conversations+messages) + public.(meta_leads, outreach_convos/msgs,
+  campaigns, outreach_sent, scheduled_dispatches). Syncs: central-db/sync.py (5min) + outreach_sync.py +
+  meta_leads_sync.py. Scripts reconstroem a imagem hermes-sync se ela sumir.
+- Deploy: git push -> Vercel auto-deploy. Envs: DATABASE_URL, DASHBOARD_PASSWORD, PAINEL_API_TOKEN, DISPATCH_CRON_SECRET.
+- Favicon: public/favicon.ico + icon.png (NÃO app/icon.png — a rota [slug] sombreia). Páginas force-dynamic.
 
 ========================================================================
-DASHBOARD (mvp_agente_ia) — features já prontas (reaproveitáveis)
+MOLDE DE CLIENTE NOVO (solo, servidor próprio) — a sequência
 ========================================================================
-Visão geral ciente do agente (leadSource form/outreach/none); Conversas (abas WhatsApp/E-mail + filtro
-Todas/Ativas24h/Responderam + tag de origem; conversa aberta estilo WhatsApp); Leads (tabela + disparo +
-Programar); Mensagens (templates); Campanhas (criar/editar/disparar; vars = ARRAY jsonb via sql.json, NUNCA
-JSON.stringify); Disparos (programar/agendar + auto-recuperação toggle OFF, cron + DISPATCH_CRON_SECRET);
-Pipeline. Pausar/responder via control API (PAINEL_API_TOKEN).
+1) Container com hermes-agent-sac:latest (traz todos os patches + faster-whisper baked).
+2) WhatsApp Cloud oficial do cliente; webhook DIRETO no container (sem roteador). Abrir os PORTÕES acima.
+3) config.yaml: stt small+pt, busy_input_mode steer, busy_ack false, grace 8s, gateway_restart_notification false,
+   platform_toolsets webhook->terminal (se e-mail).
+4) SOUL.md com o negócio + TODAS as travas acima. Testar com hermes chat -q.
+5) Google Agenda via SERVICE ACCOUNT (cliente compartilha com o email do robô).
+6) E-mail Brevo (opcional). Dashboard apontando pro banco daquele cliente.
+Tooling no VPS atual: /opt/gastaomatos/hermes/ (skills provisionar-cliente-hermes, PLAYBOOK-CLIENTE-NOVO-SAC.txt,
+MELHORES-PRATICAS-BOT.txt — fonte única, atualizar ela ao aprender algo novo).
+
+========================================================================
+REGRAS DE OURO (sempre)
+========================================================================
+- Nunca misturar dados de clientes (isolar banco/tabela/página/allowlist).
+- Nunca travessão em texto público (trava no código).
+- Deliverables em .txt na pasta do projeto. Atualizar doc EXISTENTE, nunca duplicar.
+- Não apagar histórico/conversas reais; só teste que EU criei.
 
 ========================================================================
 PENDÊNCIAS ABERTAS (10/07/2026)
 ========================================================================
-- Setar DISPATCH_CRON_SECRET na Vercel (valor em /opt/gastaomatos/hermes/dispatch-cron/.secret) -> liga disparos.
+- Setar DISPATCH_CRON_SECRET na Vercel (valor em dispatch-cron/.secret) -> liga disparos.
 - Testar disparo manual, depois ligar Auto-recuperação (campanha agente24horas:recuperacao-cadastro pronta).
 - Persistir envios manuais/disparos no histórico do dashboard (hoje somem ao recarregar).
-- Adaptar Google skill (google_api.py) p/ SERVICE ACCOUNT (pré-requisito do modelo cliente-solo).
+- Adaptar google_api.py p/ SERVICE ACCOUNT (pré-requisito do cliente-solo).
 - Credencial Meta do Dr. Lucas p/ ligar o WhatsApp dele.
-- Definir arquitetura do dashboard pro modelo solo (1 por cliente x multi-tenant).
+- Definir dashboard no modelo solo (1 por cliente x multi-tenant).
 - Rotacionar token Meta system-user p/ escopo só de messaging.
 
-Memórias estruturadas (se copiadas pro ~/.claude do servidor novo): dashboard-agentes-mvp,
-disparo-programavel-auto-recuperacao, projeto-hermes-agente24horas, nunca-misturar-clientes.
-Este arquivo vive no repo mvp_agente_ia (git clone + leia este .txt = panorama completo).
+Memórias estruturadas (copiar pro ~/.claude do servidor novo se quiser): dashboard-agentes-mvp,
+disparo-programavel-auto-recuperacao, projeto-hermes-agente24horas (a mais detalhada), nunca-misturar-clientes.
 ========================================================================
