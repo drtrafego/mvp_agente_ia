@@ -78,6 +78,31 @@ function fieldLabel(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function LeadStatusBadge({ lead }: { lead: FormLead }) {
+  if (lead.conversou) {
+    return (
+      <Badge tone="success">
+        <CheckCircle2 className="size-3" />
+        Conversou
+      </Badge>
+    );
+  }
+  if (lead.templateEnviado) {
+    return (
+      <Badge tone="violet">
+        <Send className="size-3" />
+        Disparado
+      </Badge>
+    );
+  }
+  return (
+    <Badge tone="accent">
+      <Clock className="size-3" />
+      Aguardando
+    </Badge>
+  );
+}
+
 export function LeadList({
   slug,
   leads,
@@ -259,17 +284,7 @@ export function LeadList({
                           </span>
                           {/* status inline só no mobile (a coluna Status some no celular) */}
                           <span className="mt-1 flex sm:hidden">
-                            {lead.conversou ? (
-                              <Badge tone="success">
-                                <CheckCircle2 className="size-3" />
-                                Conversou
-                              </Badge>
-                            ) : (
-                              <Badge tone="accent">
-                                <Clock className="size-3" />
-                                Aguardando
-                              </Badge>
-                            )}
+                            <LeadStatusBadge lead={lead} />
                           </span>
                         </div>
                       </div>
@@ -287,17 +302,7 @@ export function LeadList({
                       {lead.created_time ? formatDateShort(lead.created_time) : "—"}
                     </td>
                     <td className="hidden px-4 py-3 sm:table-cell">
-                      {lead.conversou ? (
-                        <Badge tone="success">
-                          <CheckCircle2 className="size-3" />
-                          Conversou
-                        </Badge>
-                      ) : (
-                        <Badge tone="accent">
-                          <Clock className="size-3" />
-                          Aguardando
-                        </Badge>
-                      )}
+                      <LeadStatusBadge lead={lead} />
                     </td>
                     <td className="hidden px-4 py-3 sm:table-cell">
                       {lead.templateEnviado ? (

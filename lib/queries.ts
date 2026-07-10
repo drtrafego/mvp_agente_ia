@@ -171,7 +171,7 @@ export async function getConversation(
 
 // Conversas do bot com tag de origem + prospecção (Minerador) -----------
 
-export type ConvOrigin = "Anúncio" | "Direto" | "Prospecção";
+export type ConvOrigin = "Anúncio" | "Direto" | "Prospecção" | "Disparo";
 export type ConvChannel = "whatsapp" | "email";
 export type ConvFilter = "all" | "ativas24h" | "responderam";
 
@@ -205,19 +205,32 @@ export async function getBotConversations(
     const rows = await sql.unsafe<(ConversationRow & { origin: string })[]>(
       `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
               c.ended_at, c.message_count, c.cost_usd,
-              case when exists (
-                select 1 from public.meta_leads l
-                where l.phone_norm is not null and l.phone_norm <> '' and (
-                  regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
-                  or (length(l.phone_norm) >= 8
-                      and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
-                          = right(l.phone_norm, 8))
-                )
-              ) or exists (
-                select 1 from "${schema}".messages m
-                where m.session_id = c.session_id and m.role = 'user'
-                  and (m.content ilike '%vim%anúncio%' or m.content ilike '%vim%anuncio%')
-              ) then 'Anúncio' else 'Direto' end as origin
+              case
+                when exists (
+                  select 1 from public.outreach_sent os
+                  where os.agent_slug = $1 and os.status = 'sent'
+                    and os.phone_norm is not null and os.phone_norm <> '' and (
+                      regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = os.phone_norm
+                      or (length(os.phone_norm) >= 8
+                          and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                              = right(os.phone_norm, 8))
+                    )
+                ) then 'Disparo'
+                when exists (
+                  select 1 from public.meta_leads l
+                  where l.phone_norm is not null and l.phone_norm <> '' and (
+                    regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+                    or (length(l.phone_norm) >= 8
+                        and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                            = right(l.phone_norm, 8))
+                  )
+                ) or exists (
+                  select 1 from "${schema}".messages m
+                  where m.session_id = c.session_id and m.role = 'user'
+                    and (m.content ilike '%vim%anúncio%' or m.content ilike '%vim%anuncio%')
+                ) then 'Anúncio'
+                else 'Direto'
+              end as origin
        from "${schema}".conversations c
        left join lateral (
          select max(m.ts) filter (where m.role = 'user') as last_user_ts,
@@ -226,11 +239,11 @@ export async function getBotConversations(
        ) mm on true
        where ${conds.join(" and ")}
        order by coalesce(c.started_at, c.ended_at) desc nulls last`,
+      [slug],
     );
-    return rows.map((r) => ({
-      ...r,
-      origin: (r.origin === "Anúncio" ? "Anúncio" : "Direto") as ConvOrigin,
-    }));
+    const norm = (o: string): ConvOrigin =>
+      o === "Disparo" ? "Disparo" : o === "Anúncio" ? "Anúncio" : "Direto";
+    return rows.map((r) => ({ ...r, origin: norm(r.origin) }));
   } catch {
     return [];
   }
@@ -315,6 +328,135 @@ export async function getOutreachMessages(
     );
   } catch {
     return [];
+  }
+}
+
+// Disparos (a gente enviou a 1ª msg via template) e a pessoa AINDA não
+// respondeu — logo não tem conversa do bot. ---------------------------
+
+export type DispatchConvo = {
+  phone_norm: string;
+  full_name: string | null;
+  template_name: string | null;
+  sent_at: string | null;
+};
+
+export type DispatchDetail = DispatchConvo & {
+  body: string | null;
+  vars: string[];
+};
+
+/**
+ * Retorna os disparos (outreach_sent) de quem NÃO respondeu (sem conversa do
+ * bot). Só WhatsApp e só filtro "all" (quem não respondeu não está ativo/24h
+ * nem "respondeu"). Dedupe por phone_norm (mais recente). Nome via meta_leads
+ * escopado por page quando a fonte é formulário (não vaza nome de outro agente).
+ */
+export async function getDispatchConvos(
+  slug: string,
+  channel: ConvChannel,
+  filter: ConvFilter = "all",
+): Promise<DispatchConvo[]> {
+  if (channel !== "whatsapp" || filter !== "all") return [];
+  const schema = safeSchema(slug);
+  const src = getLeadSource(slug);
+  const nameJoin =
+    src.leadSource === "form"
+      ? `left join lateral (
+           select l.full_name from public.meta_leads l
+           where l.page_id = $2 and l.phone_norm is not null and (
+             l.phone_norm = os.phone_norm
+             or (length(os.phone_norm) >= 8 and right(l.phone_norm, 8) = right(os.phone_norm, 8))
+           )
+           order by l.created_time desc nulls last limit 1
+         ) lead on true`
+      : "";
+  const nameSelect = src.leadSource === "form" ? "lead.full_name" : "null::text full_name";
+  const params: SqlParam[] =
+    src.leadSource === "form" ? [slug, src.pageId] : [slug];
+  try {
+    return await sql.unsafe<DispatchConvo[]>(
+      `select distinct on (os.phone_norm)
+              os.phone_norm, ${nameSelect}, os.template_name, os.sent_at
+       from public.outreach_sent os
+       ${nameJoin}
+       where os.agent_slug = $1 and os.status = 'sent'
+         and os.phone_norm is not null and os.phone_norm <> ''
+         and not exists (
+           select 1 from "${schema}".conversations c
+           where regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = os.phone_norm
+              or (length(os.phone_norm) >= 8
+                  and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                      = right(os.phone_norm, 8))
+         )
+       order by os.phone_norm, os.sent_at desc`,
+      params,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Detalhe de um disparo (para abrir): dados do envio + corpo reconstruível. */
+export async function getDispatchConvo(
+  slug: string,
+  phoneNorm: string,
+): Promise<DispatchDetail | null> {
+  const src = getLeadSource(slug);
+  try {
+    const [os] = await sql.unsafe<
+      { phone_norm: string; template_name: string | null; sent_at: string | null }[]
+    >(
+      `select phone_norm, template_name, sent_at from public.outreach_sent
+       where agent_slug = $1 and phone_norm = $2 and status = 'sent'
+       order by sent_at desc nulls last limit 1`,
+      [slug, phoneNorm],
+    );
+    if (!os) return null;
+
+    let full_name: string | null = null;
+    if (src.leadSource === "form") {
+      const [l] = await sql.unsafe<{ full_name: string | null }[]>(
+        `select full_name from public.meta_leads
+         where page_id = $1 and phone_norm is not null and (
+           phone_norm = $2
+           or (length($2) >= 8 and right(phone_norm, 8) = right($2, 8))
+         )
+         order by created_time desc nulls last limit 1`,
+        [src.pageId, phoneNorm],
+      );
+      full_name = l?.full_name ?? null;
+    }
+
+    let body: string | null = null;
+    let vars: string[] = [];
+    if (os.template_name) {
+      const [c] = await sql.unsafe<
+        { template_body: string | null; template_vars: unknown }[]
+      >(
+        `select template_body, template_vars from public.campaigns
+         where agent_slug = $1 and template_name = $2 and active = true
+         order by created_at desc nulls last limit 1`,
+        [slug, os.template_name],
+      );
+      if (c) {
+        body = c.template_body ?? null;
+        vars = Array.isArray(c.template_vars)
+          ? (c.template_vars as unknown[]).map((v) => String(v))
+          : [];
+      }
+    }
+
+    return {
+      phone_norm: os.phone_norm,
+      full_name,
+      template_name: os.template_name,
+      sent_at: os.sent_at,
+      body,
+      vars,
+    };
+  } catch {
+    return null;
   }
 }
 

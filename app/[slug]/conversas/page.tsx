@@ -8,6 +8,8 @@ import {
   getOutreachConvos,
   getOutreachConvo,
   getOutreachMessages,
+  getDispatchConvos,
+  getDispatchConvo,
   type ConvChannel,
   type ConvOrigin,
   type ConvFilter,
@@ -15,6 +17,7 @@ import {
 import { Badge } from "@/components/ui";
 import { ChatView } from "@/components/chat-view";
 import { OutreachChat } from "@/components/outreach-chat";
+import { DispatchView } from "@/components/dispatch-view";
 import { LeadCard } from "@/components/lead-card";
 import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
 import { getMetaConfig } from "@/lib/meta-config";
@@ -22,15 +25,19 @@ import { cn, formatNumber, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-const ORIGIN_TONE: Record<ConvOrigin, "secondary" | "violet" | "neutral"> = {
+const ORIGIN_TONE: Record<
+  ConvOrigin,
+  "secondary" | "violet" | "neutral" | "accent"
+> = {
   Anúncio: "secondary",
   Prospecção: "violet",
+  Disparo: "accent",
   Direto: "neutral",
 };
 
 type ListItem = {
   key: string;
-  kind: "bot" | "outreach";
+  kind: "bot" | "outreach" | "dispatch";
   href: string;
   active: boolean;
   title: string;
@@ -48,24 +55,27 @@ export default async function ConversasPage({
   searchParams: Promise<{
     c?: string;
     o?: string;
+    d?: string;
     ch?: string;
     f?: string;
   }>;
 }) {
   const { slug } = await params;
-  const { c, o, ch: chParam, f: fParam } = await searchParams;
+  const { c, o, d, ch: chParam, f: fParam } = await searchParams;
   const ch: ConvChannel = chParam === "email" ? "email" : "whatsapp";
   const filter: ConvFilter =
     fParam === "ativas24h" || fParam === "responderam" ? fParam : "all";
 
-  const [botConvos, outreachConvos] = await Promise.all([
+  const [botConvos, outreachConvos, dispatchConvos] = await Promise.all([
     getBotConversations(slug, ch, filter),
     getOutreachConvos(slug, ch, filter),
+    getDispatchConvos(slug, ch, filter),
   ]);
 
   const selectedBot = c ? await getConversation(slug, c) : null;
   const selectedOutreach = o ? await getOutreachConvo(slug, o) : null;
-  const anySelected = !!(selectedBot || selectedOutreach);
+  const selectedDispatch = d ? await getDispatchConvo(slug, d) : null;
+  const anySelected = !!(selectedBot || selectedOutreach || selectedDispatch);
 
   // Dados só do que estiver selecionado.
   const messages = selectedBot
@@ -106,6 +116,17 @@ export default async function ConversasPage({
       origin: "Prospecção" as ConvOrigin,
       date: oc.last_at,
       count: oc.msg_count,
+    })),
+    ...dispatchConvos.map((dc) => ({
+      key: `d-${dc.phone_norm}`,
+      kind: "dispatch" as const,
+      href: `/${slug}/conversas?ch=${ch}${fq}&d=${encodeURIComponent(dc.phone_norm)}`,
+      active: selectedDispatch?.phone_norm === dc.phone_norm,
+      title: dc.full_name ?? dc.phone_norm,
+      handle: dc.phone_norm,
+      origin: "Disparo" as ConvOrigin,
+      date: dc.sent_at,
+      count: 1,
     })),
   ].sort((a, b) => {
     const da = a.date ? new Date(a.date).getTime() : 0;
@@ -204,6 +225,10 @@ export default async function ConversasPage({
                 convo={selectedOutreach}
                 messages={outreachMessages}
               />
+            </div>
+          ) : selectedDispatch ? (
+            <div className="min-h-0 flex-1">
+              <DispatchView slug={slug} ch={ch} detail={selectedDispatch} />
             </div>
           ) : (
             <Placeholder />
