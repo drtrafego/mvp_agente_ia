@@ -1,0 +1,78 @@
+========================================================================
+CONTEXTO DO PROJETO — AGENTES IA (Agente24Horas / Casal do Tráfego / Dr. Lucas)
+Handoff pra uma nova sessão de Claude Code num servidor novo. Atualizado 10/07/2026.
+========================================================================
+
+# VISÃO GERAL
+Dois blocos que conversam:
+1) HERMES (o "motor"): agentes de IA (Nous Research/Hermes) que ATENDEM no WhatsApp/e-mail,
+   1 container Docker por cliente, self-hospedado no VPS em /opt/hermes.
+2) DASHBOARD (o "cockpit"): app Next.js no Vercel que MONITORA e CONTROLA os agentes,
+   FORA do Hermes. Repo: github.com/drtrafego/mvp_agente_ia. No ar: agente-ia.casaldotrafego.com
+
+Fluxo de dados: VPS (bots Hermes + crons de sync) -> NEON central (Postgres) -> Vercel (dashboard lê o Neon).
+
+# OS 3 AGENTES (containers no VPS)
+- hermes1_agente24horas — persona NINA. Vende a solução "Agente24Horas". WhatsApp oficial +55 11 99668-1596
+  (phone_id 115216611574100). Roda campanha de FORMULÁRIO Meta (página Amanda Felix 109902140539351).
+- hermes3_casaldotrafego — persona AMANDA. Agência de tráfego. WhatsApp oficial +55 66 9209-8891
+  (phone_id 414594695067374) + e-mail Brevo (oportunidade@casaldotrafego.email). Recebe a PROSPECÇÃO do Minerador.
+- hermes2_drlucas — dermatologista Dr. Lucas, Clínica Iderma. WhatsApp oficial (falta credencial Meta dele).
+  Google Agenda DELE conectada (OAuth) em 10/07 — agenda de verdade.
+Os 2 números oficiais estão no MESMO app Meta (917411172673844) -> dividem 1 webhook -> roteador wa_router
+(por phone_id) em hermes.casaldotrafego.com/whatsapp/webhook.
+Modelo dos 3: deepseek/deepseek-v4-flash (OpenRouter). Imagem base: hermes-agent-sac:latest.
+
+# ONDE FICA CADA COISA (VPS, tudo root; docker liberado pro user claude via setfacl no docker.sock)
+- Containers/dados: /opt/hermes/hermesN_<cliente>/data -> /opt/data (bind rw). SOUL.md (persona), config.yaml,
+  google_token.json, .env ficam aí. SOUL recarrega por mensagem (edita direto, sem restart; boot só cria se faltar).
+- Orquestração/scripts/docs: /opt/gastaomatos/hermes/ (central-db, meta-leads, dispatch-cron, wa_router,
+  agente_painel, minerador, docs/, CLAUDE.md control-plane).
+- Crons (crontab do claude): run-sync.sh (5min: conversas+outreach), run-meta-sync.sh (leads Meta),
+  dispatch-cron/run.sh (10min: executa disparos).
+
+# NEON CENTRAL (mesmo DATABASE_URL do dashboard; URL em /opt/gastaomatos/hermes/*/.neon)
+- Schema por agente: agente24horas / casaldotrafego / drlucas -> conversations + messages (sync do state.db).
+- public.meta_leads — leads de formulário Meta (só página do allowlist; agente24horas).
+- public.outreach_convos + outreach_msgs — prospecção do Minerador (casaldotrafego).
+- public.campaigns — campanhas salvas (template+vars). VARS = ARRAY jsonb (sql.json, NUNCA JSON.stringify).
+- public.outreach_sent — registro de disparos (dedupe).
+- public.scheduled_dispatches — disparos programados/auto-recuperação.
+
+# DASHBOARD (mvp_agente_ia) — PÁGINAS
+- Visão geral: ciente do agente (getLeadSource): agente24horas=form (funil Leads->Conversaram, meta_leads
+  escopado por page_id), casaldotrafego=outreach (funil Disparos->Responderam), drlucas=none.
+- Conversas: abas WhatsApp/E-mail + filtro Todas/Ativas24h/Responderam. Tag de origem na LISTA
+  (Anúncio/Prospecção/Direto). Conversa aberta = estilo WhatsApp (sem tag dentro). Pausar/responder.
+- Leads (tabela table-fixed, disparo + Programar), Mensagens (templates), Campanhas (criar/editar/disparar),
+  Disparos (programar/agendar + toggle Auto-recuperação OFF), Pipeline.
+- Deploy: git push na main -> Vercel auto-deploy (~60-80s). git-credentials já salvo (push funciona).
+- Env vars Vercel: DATABASE_URL, DASHBOARD_PASSWORD, PAINEL_API_TOKEN, DISPATCH_CRON_SECRET.
+
+# REGRAS DE OURO (nunca quebrar)
+- NUNCA misturar dados de clientes: tudo escopado por agent_slug / page_id / allowlist.
+- NUNCA travessão (—) em texto público. Trava no código (imagem SAC) troca por vírgula.
+- Enviar deliverables em .txt, salvar na pasta do projeto.
+- Atualizar doc/memória EXISTENTE, nunca criar duplicado.
+- Não apagar histórico/conversas reais; só dados de teste que EU criei.
+- SOUL: travas de anti-invenção (não prometer ligação, não inventar horário sem calendar list),
+  não abrir links. Testar comportamento com: hermes chat -q "<msg>".
+
+# GOOGLE AGENDA
+- Dr. Lucas: conectado via OAuth (app Desktop da agência; token em hermes2_drlucas /opt/data/google_token.json).
+- Novos clientes: usar SERVICE ACCOUNT (cliente compartilha a agenda com o email do robô, tipo Analytics).
+  Lib google.oauth2.service_account já instalada; falta adaptar google_api.py p/ autenticar via chave JSON.
+
+# PENDÊNCIAS ABERTAS (10/07/2026)
+- Setar DISPATCH_CRON_SECRET na Vercel (valor em dispatch-cron/.secret) -> liga os disparos.
+- Testar disparo manual, depois ligar Auto-recuperação (campanha agente24horas:recuperacao-cadastro pronta).
+- Persistir os envios manuais/disparos no histórico do dashboard (hoje somem ao recarregar).
+- Adaptar Google skill p/ service account (novos clientes self-service).
+- Credenciais Meta do Dr. Lucas p/ ligar o WhatsApp dele.
+- Rotacionar o token Meta system-user p/ escopo só de messaging (segurança).
+
+# COMO CONTINUAR
+Ler as memórias (se copiadas): dashboard-agentes-mvp, disparo-programavel-auto-recuperacao,
+projeto-hermes-agente24horas, nunca-misturar-clientes. Control-plane no VPS: /opt/gastaomatos/hermes/CLAUDE.md
++ docs/ (MELHORES-PRATICAS-BOT.txt, PLAYBOOK-CLIENTE-NOVO-SAC.txt). Este arquivo vive no repo mvp_agente_ia.
+========================================================================
