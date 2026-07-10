@@ -98,9 +98,12 @@ DASHBOARD (mvp_agente_ia) — features prontas
   vars = ARRAY jsonb via sql.json, NUNCA JSON.stringify -> senão dupla-codifica e some ao editar).
 - Disparos: programável/agendado + Auto-recuperação (toggle OFF). Motor lib/dispatch-runner.ts, rota
   /api/dispatch/run (DISPATCH_CRON_SECRET), cron VPS dispatch-cron/run.sh 10min. Dedupe por outreach_sent.
-- Neon central: schema por agente (conversations+messages) + public.(meta_leads, outreach_convos/msgs,
-  campaigns, outreach_sent, scheduled_dispatches). Syncs: central-db/sync.py (5min) + outreach_sync.py +
-  meta_leads_sync.py. Scripts reconstroem a imagem hermes-sync se ela sumir.
+- Neon central (conta do DONO, neondb, ~9MB de 512MB free): schema por agente (conversations+messages) +
+  public.(meta_leads, outreach_convos/msgs, campaigns, outreach_sent, scheduled_dispatches). Syncs:
+  central-db/sync.py (5min) + outreach_sync.py + meta_leads_sync.py. Scripts reconstroem a imagem hermes-sync se sumir.
+- ARQUIVO PERMANENTE (à prova de pruning): o sync de mensagens é APPEND-ONLY (INSERT ... ON CONFLICT (id)
+  DO NOTHING) — NUNCA apaga do Neon. Quando o Hermes limpar mensagens antigas do state.db, o Neon MANTÉM tudo,
+  e o dashboard lê do Neon (não do Hermes). Cliente novo = mesmo sync apontando pro Neon central, schema dele.
 - Deploy: git push -> Vercel auto-deploy. Envs: DATABASE_URL, DASHBOARD_PASSWORD, PAINEL_API_TOKEN, DISPATCH_CRON_SECRET.
 - Favicon: public/favicon.ico + icon.png (NÃO app/icon.png — a rota [slug] sombreia). Páginas force-dynamic.
 
