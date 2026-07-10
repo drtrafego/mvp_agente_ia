@@ -118,6 +118,34 @@ Tooling no VPS atual: /opt/gastaomatos/hermes/ (skills provisionar-cliente-herme
 MELHORES-PRATICAS-BOT.txt — fonte única, atualizar ela ao aprender algo novo).
 
 ========================================================================
+ARQUITETURA MULTI-SERVIDOR — 1 painel só pro dono ver TODOS os clientes (ESTUDO, pra depois)
+========================================================================
+OBJETIVO: cada cliente roda SOLO no servidor dele (ex.: Hetzner/Alemanha), MAS o dono entra em UM painel
+só (agente-ia.casaldotrafego.com) e vê/controla TODOS. Sem "1 link por cliente" (o dono rejeitou isso).
+
+RECOMENDADO = BANCO CENTRAL + SYNC de cada servidor (estende o que JÁ existe, não reinventa):
+- Hoje os 3 agentes deste VPS já sincronizam pro Neon central (schema por cliente) e o dashboard lê o Neon.
+  O modelo multi-servidor é O MESMO: o sync roda em CADA servidor remoto apontando pro MESMO Neon central.
+- Cada servidor de cliente roda: (a) o bot (container Hermes), (b) o SYNC (central-db/sync.py) empurrando
+  conversas/leads pro Neon central no schema DAQUELE cliente, (c) uma CONTROL API (tipo agente_painel) no
+  domínio do cliente, pra pausar/responder.
+- O dashboard central ganha um REGISTRO de agentes: {slug, schema, url_da_control_api, page_id, ...}.
+  Cadastra o cliente novo no registro -> ele aparece junto dos outros. UM painel, todos os clientes.
+- Ações de controle (pausar/enviar) roteiam pra control API DAQUELE servidor (cada um no seu domínio).
+  O dashboard guarda a URL da control API por agente. Leitura vem toda do Neon central.
+- Isolamento: schema por cliente no Neon central (regra que já vale). Nunca mistura.
+
+ALTERNATIVAS DESCARTADAS:
+- 1 dashboard por cliente (subdomínio cliente.agente...): dono rejeitou (vira 1 milhão de links).
+- Dashboard federado (consulta a API de cada servidor ao vivo): mais complexo/lento; central+sync é melhor.
+
+O QUE MUDA NO MOLDE DE CLIENTE-SOLO (Parte B): além do bot, subir o SYNC (apontando pro Neon central,
+schema do cliente) + a CONTROL API (no domínio do cliente) + registrar o cliente no dashboard central.
+Cada servidor remoto precisa: URL do Neon central (segredo) + token da própria control API.
+NÃO implementar agora — é o caminho de escala. A base (Neon central + sync + control API) já está pronta;
+só falta DISTRIBUIR o sync/control por servidor e o dashboard virar multi-tenant por registro.
+
+========================================================================
 REGRAS DE OURO (sempre)
 ========================================================================
 - Nunca misturar dados de clientes (isolar banco/tabela/página/allowlist).
