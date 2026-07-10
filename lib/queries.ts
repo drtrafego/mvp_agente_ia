@@ -627,6 +627,11 @@ export type FormLead = {
  */
 export async function getFormLeads(slug: string): Promise<FormLead[]> {
   const schema = safeSchema(slug);
+  // Só agentes com fonte de FORMULÁRIO têm leads aqui, ESCOPADOS pela página
+  // do agente (nunca misturar clientes). Outros (outreach/none) = sem leads de form.
+  const ls = getLeadSource(slug);
+  if (ls.leadSource !== "form") return [];
+  const pageId = ls.pageId;
   try {
     const rows = await sql.unsafe<
       (Omit<
@@ -657,7 +662,9 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
          order by coalesce(c.started_at, c.ended_at) desc nulls last
          limit 1
        ) conv on true
+       where l.page_id = $1
        order by l.created_time desc nulls last`,
+      [pageId],
     );
 
     const outreach = await getOutreachMap(slug);
