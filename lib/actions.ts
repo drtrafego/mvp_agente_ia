@@ -824,7 +824,7 @@ export async function setAutoRecovery(
 export type FollowupStep = { delayMinutes: number; message: string };
 export type FollowupConfig = { enabled: boolean; steps: FollowupStep[] };
 
-export const DEFAULT_FOLLOWUP_STEPS: FollowupStep[] = [
+const DEFAULT_FOLLOWUP_STEPS: FollowupStep[] = [
   {
     delayMinutes: 30,
     message:
