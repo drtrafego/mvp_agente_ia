@@ -225,6 +225,14 @@ export async function getBotConversations(
                             = right(l.phone_norm, 8))
                   )
                 ) or exists (
+                  select 1 from public.ctwa_referrals r
+                  where r.phone_norm is not null and r.phone_norm <> '' and (
+                    regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = r.phone_norm
+                    or (length(r.phone_norm) >= 8
+                        and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                            = right(r.phone_norm, 8))
+                  )
+                ) or exists (
                   select 1 from "${schema}".messages m
                   where m.session_id = c.session_id and m.role = 'user'
                     and (m.content ilike '%vim%anúncio%' or m.content ilike '%vim%anuncio%')
@@ -848,17 +856,22 @@ function daysBetween(startIso: string, endIso: string): string[] {
   return out;
 }
 
-/** Predicado SQL: lead (alias l) casa com alguma conversa do agente. */
-function convMatch(schema: string, extra = ""): string {
+/** Predicado SQL: <alias>.phone_norm casa com alguma conversa do agente. */
+function phoneConvMatch(schema: string, alias: string, extra = ""): string {
   return `exists (
     select 1 from "${schema}".conversations c
-    where l.phone_norm is not null and l.phone_norm <> '' and (
-      regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
-      or (length(l.phone_norm) >= 8
+    where ${alias}.phone_norm is not null and ${alias}.phone_norm <> '' and (
+      regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = ${alias}.phone_norm
+      or (length(${alias}.phone_norm) >= 8
           and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
-              = right(l.phone_norm, 8))
+              = right(${alias}.phone_norm, 8))
     ) ${extra}
   )`;
+}
+
+/** Predicado SQL: lead (alias l) casa com alguma conversa do agente. */
+function convMatch(schema: string, extra = ""): string {
+  return phoneConvMatch(schema, "l", extra);
 }
 
 type SqlParam = string | number | null;
@@ -989,51 +1002,63 @@ export async function getDashboard(
 
   if (src.leadSource === "form") {
     const pid = src.pageId;
-    const leadsCount = (a: string, b: string) =>
-      scalar(
-        `select count(*)::int v from public.meta_leads
-         where page_id = $1 and created_time >= $2 and created_time < $3`,
-        [pid, a, b],
-      );
-    const leadsConversaram = (a: string, b: string) =>
-      scalar(
-        `select count(*)::int v from public.meta_leads l
-         where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
-           and ${convMatch(schema)}`,
+    // CTWA só conta quando tem conversa no schema do agente (escopo por agente).
+    const ctwaWhere = `to_timestamp(r.ts) >= $2 and to_timestamp(r.ts) < $3
+                       and ${phoneConvMatch(schema, "r")}`;
+
+    // Leads/Conversaram/Engajaram somando meta_leads (form) + ctwa_referrals,
+    // dedupe por telefone (quem veio dos dois conta 1x).
+    const statsQuery = (a: string, b: string) =>
+      rowsSafe<{ leads: number; conversaram: number; engajaram: number }>(
+        `with universe as (
+           select l.phone_norm as phone_norm,
+                  (${phoneConvMatch(schema, "l")}) as converted,
+                  (${phoneConvMatch(schema, "l", "and coalesce(c.message_count, 0) >= 4")}) as engaged
+           from public.meta_leads l
+           where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
+           union all
+           select r.phone_norm,
+                  true as converted,
+                  (${phoneConvMatch(schema, "r", "and coalesce(c.message_count, 0) >= 4")}) as engaged
+           from public.ctwa_referrals r
+           where ${ctwaWhere}
+         ),
+         dedup as (
+           select phone_norm, bool_or(converted) converted, bool_or(engaged) engaged
+           from universe where phone_norm is not null and phone_norm <> ''
+           group by phone_norm
+         )
+         select count(*)::int leads,
+                count(*) filter (where converted)::int conversaram,
+                count(*) filter (where engaged)::int engajaram
+         from dedup`,
         [pid, a, b],
       );
 
-    [
-      leadsCur,
-      leadsPrev,
-      leadsToday,
-      conversaramCur,
-      conversaramPrev,
-      engajaram,
-      leadsByDay,
-      adRanking,
-      byPlatform,
-      topCampaigns,
-    ] = await Promise.all([
-      leadsCount(curStart, curEnd),
-      leadsCount(prevStart, prevEnd),
+    const [curS, prevS, todayN, lbd, adr, plat, camps] = await Promise.all([
+      statsQuery(curStart, curEnd),
+      statsQuery(prevStart, prevEnd),
       scalar(
-        `select count(*)::int v from public.meta_leads
-         where page_id = $1 and created_time >= $2`,
+        `select count(distinct phone_norm)::int v from (
+           select l.phone_norm from public.meta_leads l
+           where l.page_id = $1 and l.created_time >= $2
+           union all
+           select r.phone_norm from public.ctwa_referrals r
+           where to_timestamp(r.ts) >= $2 and ${phoneConvMatch(schema, "r")}
+         ) u where phone_norm is not null and phone_norm <> ''`,
         [pid, todayStart],
       ),
-      leadsConversaram(curStart, curEnd),
-      leadsConversaram(prevStart, prevEnd),
-      scalar(
-        `select count(*)::int v from public.meta_leads l
-         where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
-           and ${convMatch(schema, "and coalesce(c.message_count, 0) >= 4")}`,
-        [pid, curStart, curEnd],
-      ),
       rowsSafe<{ day: string; v: number }>(
-        `select to_char(date_trunc('day', created_time), 'YYYY-MM-DD') day, count(*)::int v
-         from public.meta_leads
-         where page_id = $1 and created_time >= $2 and created_time < $3 group by 1`,
+        `select to_char(u.day, 'YYYY-MM-DD') day, count(distinct u.phone_norm)::int v
+         from (
+           select l.phone_norm, date_trunc('day', l.created_time) day
+           from public.meta_leads l
+           where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
+           union all
+           select r.phone_norm, date_trunc('day', to_timestamp(r.ts)) day
+           from public.ctwa_referrals r where ${ctwaWhere}
+         ) u
+         group by 1`,
         [pid, curStart, curEnd],
       ),
       rowsSafe<{
@@ -1042,31 +1067,64 @@ export async function getDashboard(
         leads: number;
         conversaram: number;
       }>(
-        `select coalesce(nullif(l.ad_name, ''), '(sem anúncio)') ad_name,
-                coalesce(nullif(l.campaign_name, ''), '—') campaign_name,
-                count(*)::int leads,
-                count(*) filter (where ${convMatch(schema)})::int conversaram
-         from public.meta_leads l
-         where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
+        `select ad_name, campaign_name,
+                count(distinct phone_norm)::int leads,
+                count(distinct phone_norm) filter (where converted)::int conversaram
+         from (
+           select coalesce(nullif(l.ad_name, ''), '(sem anúncio)') ad_name,
+                  coalesce(nullif(l.campaign_name, ''), '—') campaign_name,
+                  l.phone_norm,
+                  (${phoneConvMatch(schema, "l")}) converted
+           from public.meta_leads l
+           where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
+           union all
+           select coalesce(nullif(r.ad_name, ''), '(sem anúncio)'),
+                  coalesce(nullif(r.campaign_name, ''), '—'),
+                  r.phone_norm, true
+           from public.ctwa_referrals r where ${ctwaWhere}
+         ) u
          group by 1, 2
-         order by (count(*) filter (where ${convMatch(schema)})::float
-                   / nullif(count(*), 0)) desc nulls last, leads desc
+         order by (count(distinct phone_norm) filter (where converted)::float
+                   / nullif(count(distinct phone_norm), 0)) desc nulls last, leads desc
          limit 15`,
         [pid, curStart, curEnd],
       ),
       rowsSafe<{ platform: string; value: number }>(
-        `select coalesce(nullif(platform, ''), 'unknown') platform, count(*)::int value
-         from public.meta_leads where page_id = $1 and created_time >= $2 and created_time < $3
+        `select platform, count(distinct phone_norm)::int value from (
+           select coalesce(nullif(l.platform, ''), 'unknown') platform, l.phone_norm
+           from public.meta_leads l
+           where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
+           union all
+           select 'ctwa', r.phone_norm
+           from public.ctwa_referrals r where ${ctwaWhere}
+         ) u
          group by 1 order by 2 desc`,
         [pid, curStart, curEnd],
       ),
       rowsSafe<{ campaign: string; value: number }>(
-        `select coalesce(nullif(campaign_name, ''), '—') campaign, count(*)::int value
-         from public.meta_leads where page_id = $1 and created_time >= $2 and created_time < $3
+        `select campaign, count(distinct phone_norm)::int value from (
+           select coalesce(nullif(l.campaign_name, ''), '—') campaign, l.phone_norm
+           from public.meta_leads l
+           where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
+           union all
+           select coalesce(nullif(r.campaign_name, ''), '—'), r.phone_norm
+           from public.ctwa_referrals r where ${ctwaWhere}
+         ) u
          group by 1 order by 2 desc limit 6`,
         [pid, curStart, curEnd],
       ),
     ]);
+
+    leadsCur = curS[0]?.leads ?? 0;
+    conversaramCur = curS[0]?.conversaram ?? 0;
+    engajaram = curS[0]?.engajaram ?? 0;
+    leadsPrev = prevS[0]?.leads ?? 0;
+    conversaramPrev = prevS[0]?.conversaram ?? 0;
+    leadsToday = todayN;
+    leadsByDay = lbd;
+    adRanking = adr;
+    byPlatform = plat;
+    topCampaigns = camps;
   } else if (src.leadSource === "outreach") {
     labels = { leads: "Disparos", conversaram: "Responderam" };
     const disparos = (a: string, b: string) =>

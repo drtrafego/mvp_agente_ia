@@ -91,6 +91,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   audience_network: "Audience Network",
   msg: "Messenger",
   messenger: "Messenger",
+  ctwa: "Click WhatsApp",
   unknown: "Desconhecido",
 };
 

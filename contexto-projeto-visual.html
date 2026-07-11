@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contexto do Projeto · Agentes IA</title>
+<style>
+  :root {
+    --bg:#f5f6f8; --surface:#ffffff; --surface-2:#edf0f4; --border:#dce1e8;
+    --ink:#1a222b; --muted:#54606d; --faint:#8b96a2;
+    --accent:#a5621b; --accent-bg:#f5ead9; --accent-line:#e6cfa8;
+    --blue:#2d568f; --good:#2b7a4b; --good-bg:#e2f1e8; --warn:#9a6510; --warn-bg:#f6ecd6;
+    --shadow:0 1px 2px rgba(20,30,45,.05), 0 6px 20px rgba(20,30,45,.05);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0d131a; --surface:#141d27; --surface-2:#1a2530; --border:#28333f;
+      --ink:#e7ecf2; --muted:#9ba7b3; --faint:#66717d;
+      --accent:#d99e56; --accent-bg:#2a2216; --accent-line:#4a3a20;
+      --blue:#79a3da; --good:#5cb483; --good-bg:#16261d; --warn:#d9aa5a; --warn-bg:#2a2214;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f5f6f8; --surface:#ffffff; --surface-2:#edf0f4; --border:#dce1e8;
+    --ink:#1a222b; --muted:#54606d; --faint:#8b96a2;
+    --accent:#a5621b; --accent-bg:#f5ead9; --accent-line:#e6cfa8;
+    --blue:#2d568f; --good:#2b7a4b; --good-bg:#e2f1e8; --warn:#9a6510; --warn-bg:#f6ecd6;
+    --shadow:0 1px 2px rgba(20,30,45,.05), 0 6px 20px rgba(20,30,45,.05);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d131a; --surface:#141d27; --surface-2:#1a2530; --border:#28333f;
+    --ink:#e7ecf2; --muted:#9ba7b3; --faint:#66717d;
+    --accent:#d99e56; --accent-bg:#2a2216; --accent-line:#4a3a20;
+    --blue:#79a3da; --good:#5cb483; --good-bg:#16261d; --warn:#d9aa5a; --warn-bg:#2a2214;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.28);
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    -webkit-font-smoothing:antialiased;margin:0}
+  .wrap{max-width:880px;margin:0 auto;padding:48px 22px 96px}
+  code,.mono{font-family:var(--mono)}
+  .mono{background:var(--surface-2);border:1px solid var(--border);border-radius:5px;
+    padding:1px 6px;font-size:.85em;color:var(--ink)}
+
+  header{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:32px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);font-weight:600;display:flex;gap:10px;align-items:center}
+  .eyebrow::after{content:"";height:1px;flex:1;background:var(--accent-line)}
+  h1{font-size:clamp(27px,5vw,38px);line-height:1.1;letter-spacing:-.02em;text-wrap:balance;
+    margin:14px 0 10px;font-weight:700}
+  .lede{color:var(--muted);font-size:16px;max-width:66ch;margin:0}
+  .meta{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);
+    font-size:12.5px;color:var(--faint)}
+
+  .callout{background:var(--accent-bg);border:1px solid var(--accent-line);border-left:4px solid var(--accent);
+    border-radius:10px;padding:16px 20px;margin:0 0 38px}
+  .callout h3{margin:0 0 6px;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-family:var(--mono)}
+  .callout p{margin:5px 0 0;font-size:14.5px;color:var(--ink)}
+  .callout strong{font-weight:650}
+
+  section{margin:0 0 44px}
+  .part-label{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-weight:600}
+  h2{font-size:22px;letter-spacing:-.01em;margin:4px 0 4px;font-weight:700;text-wrap:balance}
+  h2 .star{color:var(--accent)}
+  .sub{color:var(--muted);font-size:14.5px;margin:0 0 20px;max-width:70ch}
+  h4{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);
+    font-family:var(--mono);margin:26px 0 12px;font-weight:600}
+
+  .agents{display:grid;gap:12px;grid-template-columns:1fr}
+  .agent{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 17px;box-shadow:var(--shadow)}
+  .agent-top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .agent-name{font-weight:680;font-size:15px}
+  .agent-name .persona{color:var(--accent);font-weight:700}
+  .agent-desc{color:var(--muted);font-size:13.5px;margin:6px 0 0}
+  .agent-desc .mono{font-size:11.5px}
+  .chip{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.03em;padding:2px 9px;border-radius:999px;white-space:nowrap;border:1px solid transparent}
+  .chip.live{background:var(--good-bg);color:var(--good);border-color:color-mix(in srgb,var(--good) 30%,transparent)}
+  .chip.pend{background:var(--warn-bg);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 32%,transparent)}
+
+  /* spec cards — the config catalog */
+  .specs{display:grid;gap:16px}
+  .spec{background:var(--surface);border:1px solid var(--border);border-radius:13px;overflow:hidden;box-shadow:var(--shadow)}
+  .spec > .head{display:flex;align-items:center;gap:10px;padding:13px 18px;background:var(--surface-2);border-bottom:1px solid var(--border)}
+  .spec > .head .t{font-weight:680;font-size:14.5px}
+  .spec > .head .tag{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+  .spec .body{padding:6px 18px 12px}
+  .kv{display:grid;grid-template-columns:200px 1fr;gap:4px 18px;padding:9px 0;border-bottom:1px dashed var(--border);align-items:baseline}
+  .kv:last-child{border-bottom:0}
+  .kv .k{font-family:var(--mono);font-size:12.5px;color:var(--ink);font-weight:600}
+  .kv .k .val{color:var(--accent)}
+  .kv .d{color:var(--muted);font-size:13.5px}
+  .kv .d b{color:var(--ink);font-weight:600}
+  .why{display:inline-block;margin-top:2px;font-size:12.5px;color:var(--warn);font-style:italic}
+
+  ol.steps{list-style:none;counter-reset:s;padding:0;margin:0;display:grid;gap:11px}
+  ol.steps li{counter-increment:s;position:relative;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 18px 14px 52px;box-shadow:var(--shadow)}
+  ol.steps li::before{content:counter(s);position:absolute;left:13px;top:13px;width:25px;height:25px;display:grid;place-items:center;border-radius:7px;background:var(--ink);color:var(--bg);font-family:var(--mono);font-size:13px;font-weight:700}
+  ol.steps b{font-weight:650}
+  ol.steps p{margin:4px 0 0;color:var(--muted);font-size:13.5px}
+
+  ul.plain{list-style:none;padding:0;margin:0;display:grid;gap:9px}
+  ul.plain li{padding-left:20px;position:relative;font-size:14px;color:var(--ink)}
+  ul.plain li::before{content:"";position:absolute;left:2px;top:9px;width:6px;height:6px;border-radius:2px;background:var(--accent);transform:rotate(45deg)}
+  ul.plain li b{font-weight:640}
+
+  .todo{display:grid;gap:8px}
+  .todo .item{display:flex;gap:11px;align-items:flex-start;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 15px;font-size:13.5px}
+  .todo .box{flex:none;width:16px;height:16px;border:1.6px solid var(--warn);border-radius:4px;margin-top:2px}
+  .todo .item.done .box{background:var(--good);border-color:var(--good)}
+  .todo .item.done{opacity:.6}
+
+  footer{border-top:1px solid var(--border);margin-top:8px;padding-top:20px;color:var(--faint);font-family:var(--mono);font-size:12.5px}
+  a{color:var(--blue);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--blue) 35%,transparent)}
+  @media (max-width:600px){ .kv{grid-template-columns:1fr;gap:2px} .kv .k{margin-bottom:1px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Handoff · Contexto do projeto</div>
+    <h1>Agentes de IA para SAC no WhatsApp</h1>
+    <p class="lede">O que a sessão nova <em>não</em> adivinha: as dezenas de configurações, ajustes finos, patches e gotchas que descobrimos e aplicamos no bot. Não é "como instalar o Hermes" — é o mapa do que já está resolvido.</p>
+    <div class="meta"><span>Atualizado 10/07/2026</span><span>repo: mvp_agente_ia</span><span>CONTEXTO-PROJETO.txt</span></div>
+  </header>
+
+  <div class="callout">
+    <h3>Arquitetura em 2 fases</h3>
+    <p><strong>Fase atual (este servidor):</strong> 3 agentes juntos num VPS, dividindo 1 banco e 1 dashboard. MVP.</p>
+    <p><strong>Modelo novo:</strong> cada cliente novo <strong>solo no próprio servidor</strong> (1 container, 1 número, seu banco/dashboard). A Parte A é referência; a config abaixo se replica em todo cliente.</p>
+  </div>
+
+  <section>
+    <div class="part-label">Parte A · este servidor</div>
+    <h2>Os 3 agentes em produção</h2>
+    <div class="agents">
+      <div class="agent"><div class="agent-top"><span class="agent-name">hermes1 · <span class="persona">Nina</span></span><span class="chip live">no ar</span></div>
+        <p class="agent-desc">Produto "Agente24Horas". WhatsApp <span class="mono">+55 11 99668-1596</span> · campanha de formulário Meta (página <span class="mono">109902140539351</span>).</p></div>
+      <div class="agent"><div class="agent-top"><span class="agent-name">hermes3 · <span class="persona">Amanda</span></span><span class="chip live">no ar</span></div>
+        <p class="agent-desc">Agência de tráfego. WhatsApp <span class="mono">+55 66 9209-8891</span> + e-mail Brevo. Recebe a prospecção do Minerador.</p></div>
+      <div class="agent"><div class="agent-top"><span class="agent-name">hermes2 · <span class="persona">Dr. Lucas</span></span><span class="chip pend">WhatsApp pendente</span></div>
+        <p class="agent-desc">Dermatologista. Google Agenda dele conectada (OAuth). Falta a credencial Meta pra ligar o WhatsApp.</p></div>
+    </div>
+    <p class="sub" style="margin-top:14px">Multi-tenant é só deste servidor: os 2 números dividem 1 app Meta → 1 webhook → roteador <span class="mono">wa_router</span> por phone_id. <b>Cliente solo não precisa de roteador.</b></p>
+  </section>
+
+  <section>
+    <div class="part-label">O ouro</div>
+    <h2>Configurações e ajustes já aplicados no bot <span class="star">★</span></h2>
+    <p class="sub">Cada linha é uma decisão que custou tempo pra descobrir. Replicar tudo isso em todo cliente novo. Valores exatos em monoespaçado.</p>
+
+    <div class="specs">
+
+      <div class="spec"><div class="head"><span class="t">Modelo &amp; imagem</span><span class="tag">base</span></div><div class="body">
+        <div class="kv"><span class="k">modelo</span><span class="d"><span class="mono">deepseek/deepseek-v4-flash</span> (OpenRouter). Barato/fraco em ferramenta, se inventar demais mesmo com as travas, subir o modelo.</span></div>
+        <div class="kv"><span class="k">imagem</span><span class="d"><span class="mono">hermes-agent-sac:latest</span> (base + patches <b>baked</b>). Recriar container preserva os patches; config/SOUL ficam no volume <span class="mono">/opt/data</span>.</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">Transcrição de áudio</span><span class="tag">config.yaml · stt.local</span></div><div class="body">
+        <div class="kv"><span class="k">model = <span class="val">small</span></span><span class="d">language <span class="mono">'pt'</span>. <span class="why">o 'base' alucinava; small+pt acerta</span></span></div>
+        <div class="kv"><span class="k">HF_HOME</span><span class="d"><span class="mono">/opt/data/.cache/hf</span> (volume) → o modelo persiste em recriar, só re-instala o pacote (faster-whisper via uv pip, baked).</span></div>
+        <div class="kv"><span class="k">echo 🎙️</span><span class="d"><b>suprimido</b> pro cliente (patch no <span class="mono">whatsapp_cloud.send</span>): não ecoa a transcrição.</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">Rajada de mensagens</span><span class="tag">várias msgs → 1 resposta</span></div><div class="body">
+        <div class="kv"><span class="k">busy_input_mode = <span class="val">steer</span></span><span class="d">injeta a 2ª msg na resposta em andamento → <b>uma</b> resposta, não duas.</span></div>
+        <div class="kv"><span class="k">grace = <span class="val">8s</span></span><span class="d">espera juntar as msgs antes de responder. O grace nativo é só Telegram → <span class="mono">patch_grace_whatsapp.py</span> + env.</span></div>
+        <div class="kv"><span class="k">busy_ack = <span class="val">false</span></span><span class="d">some o "Queued for the next turn".</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">Trava de travessão (—)</span><span class="tag">regra do dono</span></div><div class="body">
+        <div class="kv"><span class="k">patch_no_travessao</span><span class="d">baked na imagem. Troca —/–/― por vírgula <b>antes de enviar</b>, no WhatsApp e no e-mail Brevo. O modelo insiste em gerar —; a trava é no código (não adianta só no SOUL).</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">Portões de atendimento</span><span class="tag">.env · todo bot SAC</span></div><div class="body">
+        <div class="kv"><span class="k">ALLOW_ALL_USERS = <span class="val">true</span></span><span class="d">atende qualquer número (senão pede "pairing code").</span></div>
+        <div class="kv"><span class="k">HOME_CHANNEL</span><span class="d">= número do dono (+ nome). Cala o prompt "no home channel set".</span></div>
+        <div class="kv"><span class="k">restart_notification = <span class="val">false</span></span><span class="d">não spamma "Gateway shutting down" no dono a cada restart.</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">Google Agenda</span><span class="tag">skill google-workspace</span></div><div class="body">
+        <div class="kv"><span class="k">calendar</span><span class="d">list/create/update/delete. create/update com <span class="mono">sendUpdates="all"</span> (dispara o convite). Fuso <span class="mono">-03:00</span> obrigatório.</span></div>
+        <div class="kv"><span class="k">platform_toolsets</span><span class="d"><span class="mono">webhook → [hermes-webhook, terminal]</span>. <span class="why">sem o terminal, a sessão de e-mail não agendava</span></span></div>
+        <div class="kv"><span class="k">auth</span><span class="d">OAuth (token chown hermes:hermes) <b>ou Service Account</b> (modelo dos novos: cliente compartilha a agenda com o email do robô, igual Analytics). Falta adaptar o <span class="mono">google_api.py</span>.</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">E-mail Brevo</span><span class="tag">só casaldotrafego</span></div><div class="body">
+        <div class="kv"><span class="k">envio</span><span class="d">MCP oficial da Brevo. <span class="mono">tools.include</span> podado p/ 4 tools (282 distraíam o bot).</span></div>
+        <div class="kv"><span class="k">recebe</span><span class="d">Inbound Parsing → signer HMAC → webhook. <span class="mono">patch_webhook_session</span>: mesmo remetente = 1 conversa.</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">SOUL / comportamento</span><span class="tag">/opt/data/SOUL.md · recarrega por msg</span></div><div class="body">
+        <div class="kv"><span class="k">anti-invenção</span><span class="d">só oferece horário do <span class="mono">calendar list</span> real; nunca promete ligação/retorno humano; não inventa escassez nem link.</span></div>
+        <div class="kv"><span class="k">não abrir links</span><span class="d">a Nina gastou 87s tentando abrir um Instagram → regra fixa: não acessa links.</span></div>
+        <div class="kv"><span class="k">fluxo</span><span class="d">qualifica → objeção → <b>trial close</b> → agenda. Lead quente vai direto. Nome/e-mail só após o "sim". Janela seg-sex 10h-15h. Msgs curtas, 1 pergunta por vez.</span></div>
+        <div class="kv"><span class="k">testar</span><span class="d"><span class="mono">hermes chat -q "&lt;msg&gt;"</span> (sem WhatsApp). Após corrigir, RESETAR a conversa de teste (o histórico ruim contamina).</span></div>
+      </div></div>
+
+      <div class="spec"><div class="head"><span class="t">Gotcha de persistência</span><span class="tag">crítico</span></div><div class="body">
+        <div class="kv"><span class="k">patches de core</span><span class="d">whatsapp_cloud.py / webhook.py <b>somem ao recriar</b> → por isso estão baked na imagem SAC. Se rebuildar a base, re-aplicar: no_travessao, grace, webhook_session, gcal_full, pause_cloud.</span></div>
+      </div></div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="part-label">Parte B</div>
+    <h2>Molde de cliente novo (solo)</h2>
+    <ol class="steps">
+      <li><b>1 container</b> com <span class="mono">hermes-agent-sac:latest</span><p>Já traz todos os patches + faster-whisper. Volume <span class="mono">/opt/data</span>.</p></li>
+      <li><b>WhatsApp Cloud oficial</b> do cliente, webhook direto (sem roteador)<p>Abrir os portões: ALLOW_ALL_USERS, HOME_CHANNEL, restart_notification false.</p></li>
+      <li><b>config.yaml</b> com os ajustes<p>stt small+pt · busy_input_mode steer · busy_ack false · grace 8s · platform_toolsets webhook→terminal (se e-mail).</p></li>
+      <li><b>SOUL.md</b> com o negócio + todas as travas<p>Anti-invenção, não abrir links, sem travessão, trial close. Testar com <span class="mono">hermes chat -q</span>.</p></li>
+      <li><b>Google Agenda via Service Account</b><p>Cliente compartilha a agenda com o email do robô (permissão "fazer alterações nos eventos").</p></li>
+      <li><b>E-mail Brevo (opcional) + dashboard</b> apontando pro banco do cliente<p>Tooling no VPS: skills provisionar-cliente-hermes + PLAYBOOK-CLIENTE-NOVO-SAC.txt (fonte única).</p></li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="part-label">Estudo · pra depois</div>
+    <h2>1 painel só, todos os clientes em servidores separados</h2>
+    <p class="sub">Cada cliente roda solo no servidor dele, mas o dono entra em <b>um lugar só</b> e vê todos. Sem um link por cliente. A base (Neon central + sync) já existe — só falta distribuir.</p>
+    <div class="spec"><div class="head"><span class="t">Modelo recomendado — banco central + sync por servidor</span><span class="tag">estende o atual</span></div><div class="body">
+      <div class="kv"><span class="k">cada servidor</span><span class="d">roda o bot + o <b>sync</b> (empurra conversas/leads pro Neon central, no schema daquele cliente) + uma <b>control API</b> (pausar/responder) no domínio do cliente.</span></div>
+      <div class="kv"><span class="k">dashboard central</span><span class="d">um <b>registro</b> de agentes {slug, schema, url da control API...}. Cadastra o cliente → aparece junto dos outros. Leitura toda do Neon central.</span></div>
+      <div class="kv"><span class="k">controle</span><span class="d">pausar/enviar roteia pra control API <b>daquele servidor</b> (o dashboard guarda a URL por agente).</span></div>
+      <div class="kv"><span class="k">isolamento</span><span class="d">schema por cliente no Neon central — nunca mistura.</span></div>
+    </div></div>
+    <p class="sub" style="margin-top:14px"><b>Descartado:</b> 1 dashboard por cliente (vira mil links) · dashboard federado consultando cada servidor ao vivo (complexo/lento). <b>Não implementar agora</b> — é o caminho de escala; a base já está pronta.</p>
+  </section>
+
+  <section>
+    <h4>Dashboard (mvp_agente_ia) — pronto</h4>
+    <ul class="plain">
+      <li><b>Visão geral</b> ciente do agente (form / outreach / none) · <b>Conversas</b> (abas WhatsApp/E-mail + filtro Ativas 24h/Responderam + tag de origem).</li>
+      <li><b>Leads</b> (disparar + Programar) · <b>Campanhas</b> (vars = array jsonb, nunca JSON.stringify) · <b>Disparos</b> (agendar + auto-recuperação).</li>
+      <li>Neon central (schema por agente + <span class="mono">public.*</span>), syncs no cron, deploy git→Vercel. Envs: DATABASE_URL, DASHBOARD_PASSWORD, PAINEL_API_TOKEN, DISPATCH_CRON_SECRET.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h4>Pendências · 10/07/2026</h4>
+    <div class="todo">
+      <div class="item"><span class="box"></span><span>Setar <span class="mono">DISPATCH_CRON_SECRET</span> na Vercel → liga os disparos.</span></div>
+      <div class="item"><span class="box"></span><span>Testar disparo manual → ligar auto-recuperação (campanha já criada).</span></div>
+      <div class="item"><span class="box"></span><span>Persistir envios manuais no histórico do dashboard.</span></div>
+      <div class="item"><span class="box"></span><span>Adaptar <span class="mono">google_api.py</span> p/ Service Account (pré-requisito do cliente-solo).</span></div>
+      <div class="item"><span class="box"></span><span>Credencial Meta do Dr. Lucas p/ ligar o WhatsApp dele.</span></div>
+      <div class="item"><span class="box"></span><span>Definir dashboard no modelo solo (1 por cliente × multi-tenant).</span></div>
+      <div class="item done"><span class="box"></span><span>Agenda do Dr. Lucas conectada · travas de SOUL (anti-invenção, links) aplicadas.</span></div>
+    </div>
+  </section>
+
+  <footer>
+    Memória detalhada: <span class="mono">projeto-hermes-agente24horas</span> (todos os patches e lições).  ·  Handoff portátil: <span class="mono">CONTEXTO-PROJETO.txt</span> no repo.  ·  Fonte única de bot no VPS: <span class="mono">MELHORES-PRATICAS-BOT.txt</span>.
+  </footer>
+</div>
+</body>
+</html>
