@@ -818,3 +818,141 @@ export async function setAutoRecovery(
     return { ok: false, error: "Erro ao atualizar a auto-recuperação." };
   }
 }
+
+// ---- Follow-up automático (lembretes quando o lead para) ------------
+
+export type FollowupStep = { delayMinutes: number; message: string };
+export type FollowupConfig = { enabled: boolean; steps: FollowupStep[] };
+
+export const DEFAULT_FOLLOWUP_STEPS: FollowupStep[] = [
+  {
+    delayMinutes: 30,
+    message:
+      "Oi! Vi que a gente parou no meio 😊 Ainda quer ver como o Agente24Horas atende seus clientes 24h no automático? É rapidinho.",
+  },
+  {
+    delayMinutes: 120,
+    message:
+      "Passando pra saber se ficou alguma dúvida. Posso te mostrar o agente funcionando em 2 minutos, sem compromisso.",
+  },
+  {
+    delayMinutes: 240,
+    message:
+      "Sei que o dia corre! Quando puder, me chama que eu te mostro como parar de perder cliente fora do horário.",
+  },
+  {
+    delayMinutes: 720,
+    message:
+      "Ainda dá tempo de eu te mostrar na prática. Quer que eu reserve um horário rápido pra você ver o agente ao vivo?",
+  },
+  {
+    delayMinutes: 1440,
+    message:
+      "Última mensagem pra não te encher 😊 Se ainda tiver interesse em automatizar seu WhatsApp, é só responder que eu retomo daqui.",
+  },
+];
+
+async function ensureFollowupTables(): Promise<void> {
+  await sql.unsafe(
+    `create table if not exists public.followup_config (
+       agent_slug text primary key,
+       enabled boolean default false,
+       steps jsonb,
+       updated_at timestamptz default now()
+     )`,
+  );
+  await sql.unsafe(
+    `create table if not exists public.followup_sent (
+       id text primary key,
+       agent_slug text,
+       chat_id text,
+       step_index int,
+       based_on_ts timestamptz,
+       sent_at timestamptz default now(),
+       status text
+     )`,
+  );
+  await sql.unsafe(
+    `create unique index if not exists followup_sent_uniq
+       on public.followup_sent (agent_slug, chat_id, step_index, based_on_ts)`,
+  );
+}
+
+function sanitizeSteps(steps: unknown): FollowupStep[] {
+  if (!Array.isArray(steps)) return [];
+  return steps
+    .map((s) => {
+      const o = (s ?? {}) as { delayMinutes?: unknown; message?: unknown };
+      const delayMinutes = Math.max(1, Math.round(Number(o.delayMinutes) || 0));
+      const message = typeof o.message === "string" ? o.message.trim() : "";
+      return { delayMinutes, message };
+    })
+    .filter((s) => s.delayMinutes > 0 && s.message.length > 0)
+    .sort((a, b) => a.delayMinutes - b.delayMinutes);
+}
+
+export async function getFollowupConfig(
+  slug: string,
+): Promise<FollowupConfig> {
+  const fallback: FollowupConfig = {
+    enabled: false,
+    steps: DEFAULT_FOLLOWUP_STEPS,
+  };
+  try {
+    if (!getAgent(slug)) return fallback;
+    await ensureFollowupTables();
+    const [row] = await sql.unsafe<
+      { enabled: boolean | null; steps: unknown }[]
+    >(
+      `select enabled, steps from public.followup_config where agent_slug = $1 limit 1`,
+      [slug],
+    );
+    if (!row) {
+      // Semeia o default na primeira vez (desligado).
+      await sql`
+        insert into public.followup_config (agent_slug, enabled, steps, updated_at)
+        values (${slug}, false, ${sql.json(DEFAULT_FOLLOWUP_STEPS)}, now())
+        on conflict (agent_slug) do nothing
+      `;
+      return fallback;
+    }
+    const steps = sanitizeSteps(row.steps);
+    return {
+      enabled: !!row.enabled,
+      steps: steps.length ? steps : DEFAULT_FOLLOWUP_STEPS,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function saveFollowupConfig(
+  slug: string,
+  input: { enabled: boolean; steps: FollowupStep[] },
+): Promise<ActionResult> {
+  try {
+    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+    if (!getMetaConfig(slug))
+      return { ok: false, error: "Agente sem número de WhatsApp oficial." };
+    const steps = sanitizeSteps(input.steps);
+    if (input.enabled && steps.length === 0)
+      return {
+        ok: false,
+        error: "Adicione ao menos um passo com tempo e mensagem.",
+      };
+
+    await ensureFollowupTables();
+    await sql`
+      insert into public.followup_config (agent_slug, enabled, steps, updated_at)
+      values (${slug}, ${input.enabled}, ${sql.json(steps)}, now())
+      on conflict (agent_slug) do update set
+        enabled = excluded.enabled,
+        steps = excluded.steps,
+        updated_at = now()
+    `;
+    revalidatePath(`/${slug}/disparos`);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro ao salvar o follow-up." };
+  }
+}

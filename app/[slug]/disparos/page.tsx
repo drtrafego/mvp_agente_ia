@@ -5,10 +5,12 @@ import {
   listScheduledDispatches,
   getAutoRecovery,
   listCampaigns,
+  getFollowupConfig,
 } from "@/lib/actions";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { DisparosManager } from "@/components/disparos-manager";
+import { FollowupCard } from "@/components/followup-card";
 import { formatNumber } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -25,10 +27,11 @@ export default async function DisparosPage({
   const sendEnabled = !!getMetaConfig(slug);
   const autoSupported = getLeadSource(slug).leadSource === "form";
 
-  const [dispatches, autoRecovery, campaigns] = await Promise.all([
+  const [dispatches, autoRecovery, campaigns, followup] = await Promise.all([
     listScheduledDispatches(slug),
     getAutoRecovery(slug),
     listCampaigns(slug),
+    getFollowupConfig(slug),
   ]);
 
   const pendentes = dispatches.filter(
@@ -52,13 +55,20 @@ export default async function DisparosPage({
         </p>
       ) : null}
 
-      <DisparosManager
-        slug={slug}
-        dispatches={dispatches}
-        autoRecovery={autoRecovery}
-        campaigns={campaigns}
-        autoSupported={autoSupported && sendEnabled}
-      />
+      <div className="space-y-5">
+        <FollowupCard
+          slug={slug}
+          config={followup}
+          supported={sendEnabled}
+        />
+        <DisparosManager
+          slug={slug}
+          dispatches={dispatches}
+          autoRecovery={autoRecovery}
+          campaigns={campaigns}
+          autoSupported={autoSupported && sendEnabled}
+        />
+      </div>
     </PageWrapper>
   );
 }
