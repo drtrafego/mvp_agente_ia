@@ -821,35 +821,17 @@ export async function setAutoRecovery(
 
 // ---- Follow-up automático (lembretes quando o lead para) ------------
 
-export type FollowupStep = { delayMinutes: number; message: string };
+// Follow-up CONTEXTUAL: a Nina escreve cada lembrete lendo a conversa.
+// O dashboard só define QUANDO (os tempos) e o on/off.
+export type FollowupStep = { delayMinutes: number };
 export type FollowupConfig = { enabled: boolean; steps: FollowupStep[] };
 
 const DEFAULT_FOLLOWUP_STEPS: FollowupStep[] = [
-  {
-    delayMinutes: 30,
-    message:
-      "Oi! Vi que a gente parou no meio 😊 Ainda quer ver como o Agente24Horas atende seus clientes 24h no automático? É rapidinho.",
-  },
-  {
-    delayMinutes: 120,
-    message:
-      "Passando pra saber se ficou alguma dúvida. Posso te mostrar o agente funcionando em 2 minutos, sem compromisso.",
-  },
-  {
-    delayMinutes: 240,
-    message:
-      "Sei que o dia corre! Quando puder, me chama que eu te mostro como parar de perder cliente fora do horário.",
-  },
-  {
-    delayMinutes: 720,
-    message:
-      "Ainda dá tempo de eu te mostrar na prática. Quer que eu reserve um horário rápido pra você ver o agente ao vivo?",
-  },
-  {
-    delayMinutes: 1440,
-    message:
-      "Última mensagem pra não te encher 😊 Se ainda tiver interesse em automatizar seu WhatsApp, é só responder que eu retomo daqui.",
-  },
+  { delayMinutes: 30 },
+  { delayMinutes: 120 },
+  { delayMinutes: 240 },
+  { delayMinutes: 720 },
+  { delayMinutes: 1440 },
 ];
 
 async function ensureFollowupTables(): Promise<void> {
@@ -880,15 +862,16 @@ async function ensureFollowupTables(): Promise<void> {
 
 function sanitizeSteps(steps: unknown): FollowupStep[] {
   if (!Array.isArray(steps)) return [];
-  return steps
-    .map((s) => {
-      const o = (s ?? {}) as { delayMinutes?: unknown; message?: unknown };
-      const delayMinutes = Math.max(1, Math.round(Number(o.delayMinutes) || 0));
-      const message = typeof o.message === "string" ? o.message.trim() : "";
-      return { delayMinutes, message };
-    })
-    .filter((s) => s.delayMinutes > 0 && s.message.length > 0)
-    .sort((a, b) => a.delayMinutes - b.delayMinutes);
+  const seen = new Set<number>();
+  const out: FollowupStep[] = [];
+  for (const s of steps) {
+    const o = (s ?? {}) as { delayMinutes?: unknown };
+    const delayMinutes = Math.max(1, Math.round(Number(o.delayMinutes) || 0));
+    if (delayMinutes <= 0 || seen.has(delayMinutes)) continue;
+    seen.add(delayMinutes);
+    out.push({ delayMinutes });
+  }
+  return out.sort((a, b) => a.delayMinutes - b.delayMinutes);
 }
 
 export async function getFollowupConfig(
@@ -938,7 +921,7 @@ export async function saveFollowupConfig(
     if (input.enabled && steps.length === 0)
       return {
         ok: false,
-        error: "Adicione ao menos um passo com tempo e mensagem.",
+        error: "Adicione ao menos um tempo de follow-up.",
       };
 
     await ensureFollowupTables();

@@ -10,6 +10,7 @@ import {
   Loader2,
   CheckCircle2,
   TriangleAlert,
+  Sparkles,
   Save,
 } from "lucide-react";
 import {
@@ -49,12 +50,12 @@ export function FollowupCard({
     setError(null);
   }
 
-  function updateStep(i: number, patch: Partial<FollowupStep>) {
-    setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  function setDelay(i: number, delayMinutes: number) {
+    setSteps((prev) => prev.map((s, idx) => (idx === i ? { delayMinutes } : s)));
     touch();
   }
   function addStep() {
-    setSteps((prev) => [...prev, { delayMinutes: 60, message: "" }]);
+    setSteps((prev) => [...prev, { delayMinutes: 60 }]);
     touch();
   }
   function removeStep(i: number) {
@@ -80,10 +81,12 @@ export function FollowupCard({
     const clean = steps
       .map((s) => ({
         delayMinutes: Math.max(1, Math.round(Number(s.delayMinutes) || 0)),
-        message: s.message.trim(),
       }))
       .sort((a, b) => a.delayMinutes - b.delayMinutes);
-    const res = await saveFollowupConfig(slug, { enabled: nextEnabled, steps: clean });
+    const res = await saveFollowupConfig(slug, {
+      enabled: nextEnabled,
+      steps: clean,
+    });
     setSaving(false);
     if (res.ok) {
       setDirty(false);
@@ -112,9 +115,10 @@ export function FollowupCard({
           <div>
             <h3 className="font-semibold">Follow-up automático</h3>
             <p className="mt-0.5 max-w-lg text-xs text-muted">
-              Quando o lead para de responder, envia estes lembretes nos tempos
-              definidos (dentro da janela de 72h). Se ele responder, a sequência
-              reinicia.
+              A Nina lê a conversa e escreve o follow-up sozinha, retomando de
+              onde parou. Você só define <strong>quando</strong> ela manda o
+              lembrete (dentro da janela de 72h). Se o lead responder, a
+              sequência reinicia.
             </p>
           </div>
         </div>
@@ -141,91 +145,85 @@ export function FollowupCard({
           Este agente não tem número de WhatsApp oficial.
         </p>
       ) : (
-        <div className="mt-4 space-y-3">
+        <div className="mt-4 space-y-2.5">
+          <div className="flex items-center gap-1.5 rounded-lg border border-accent-2/30 bg-accent-2/10 px-3 py-2 text-[11px] text-[#c4b5fd]">
+            <Sparkles className="size-3.5 shrink-0" />
+            A mensagem de cada lembrete é escrita pela Nina na hora, com base na
+            conversa. Aqui você define só os tempos.
+          </div>
+
           {steps.map((step, i) => {
             const isPreset = PRESETS.includes(step.delayMinutes);
             return (
               <div
                 key={i}
-                className="rounded-xl border border-border bg-surface-2/40 p-3"
+                className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface-2/40 p-2.5"
               >
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent-2/15 text-[11px] font-semibold text-[#c4b5fd]">
-                    {i + 1}
+                <span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent-2/15 text-[11px] font-semibold text-[#c4b5fd]">
+                  {i + 1}
+                </span>
+                <span className="text-[11px] uppercase tracking-wide text-muted-2">
+                  Lembrete após
+                </span>
+                <select
+                  value={isPreset ? String(step.delayMinutes) : "custom"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v !== "custom") setDelay(i, Number(v));
+                    else setDelay(i, step.delayMinutes);
+                  }}
+                  className="appearance-none rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-fg outline-none focus:border-secondary/50"
+                >
+                  {PRESETS.map((m) => (
+                    <option key={m} value={m}>
+                      {labelMin(m)}
+                    </option>
+                  ))}
+                  <option value="custom">Personalizado…</option>
+                </select>
+                {!isPreset ? (
+                  <span className="inline-flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={1}
+                      value={step.delayMinutes}
+                      onChange={(e) =>
+                        setDelay(
+                          i,
+                          Math.max(1, Math.round(Number(e.target.value) || 0)),
+                        )
+                      }
+                      className="w-20 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-fg outline-none focus:border-secondary/50"
+                    />
+                    <span className="text-[11px] text-muted-2">min</span>
                   </span>
-                  <span className="text-[11px] uppercase tracking-wide text-muted-2">
-                    Após
-                  </span>
-                  <select
-                    value={isPreset ? String(step.delayMinutes) : "custom"}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v !== "custom")
-                        updateStep(i, { delayMinutes: Number(v) });
-                      else updateStep(i, { delayMinutes: step.delayMinutes });
-                    }}
-                    className="appearance-none rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-fg outline-none focus:border-secondary/50"
-                  >
-                    {PRESETS.map((m) => (
-                      <option key={m} value={m}>
-                        {labelMin(m)}
-                      </option>
-                    ))}
-                    <option value="custom">Personalizado…</option>
-                  </select>
-                  {!isPreset ? (
-                    <span className="inline-flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={1}
-                        value={step.delayMinutes}
-                        onChange={(e) =>
-                          updateStep(i, {
-                            delayMinutes: Math.max(
-                              1,
-                              Math.round(Number(e.target.value) || 0),
-                            ),
-                          })
-                        }
-                        className="w-20 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5 text-xs text-fg outline-none focus:border-secondary/50"
-                      />
-                      <span className="text-[11px] text-muted-2">min</span>
-                    </span>
-                  ) : null}
+                ) : null}
 
-                  <div className="ml-auto flex items-center gap-1">
-                    <button
-                      onClick={() => move(i, -1)}
-                      disabled={i === 0}
-                      aria-label="Subir"
-                      className="grid size-7 place-items-center rounded-md text-muted-2 hover:text-fg disabled:opacity-30"
-                    >
-                      <ArrowUp className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => move(i, 1)}
-                      disabled={i === steps.length - 1}
-                      aria-label="Descer"
-                      className="grid size-7 place-items-center rounded-md text-muted-2 hover:text-fg disabled:opacity-30"
-                    >
-                      <ArrowDown className="size-3.5" />
-                    </button>
-                    <button
-                      onClick={() => removeStep(i)}
-                      aria-label="Remover passo"
-                      className="grid size-7 place-items-center rounded-md text-muted-2 hover:bg-destructive/15 hover:text-[#f87171]"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
+                <div className="ml-auto flex items-center gap-1">
+                  <button
+                    onClick={() => move(i, -1)}
+                    disabled={i === 0}
+                    aria-label="Subir"
+                    className="grid size-7 place-items-center rounded-md text-muted-2 hover:text-fg disabled:opacity-30"
+                  >
+                    <ArrowUp className="size-3.5" />
+                  </button>
+                  <button
+                    onClick={() => move(i, 1)}
+                    disabled={i === steps.length - 1}
+                    aria-label="Descer"
+                    className="grid size-7 place-items-center rounded-md text-muted-2 hover:text-fg disabled:opacity-30"
+                  >
+                    <ArrowDown className="size-3.5" />
+                  </button>
+                  <button
+                    onClick={() => removeStep(i)}
+                    aria-label="Remover"
+                    className="grid size-7 place-items-center rounded-md text-muted-2 hover:bg-destructive/15 hover:text-[#f87171]"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
                 </div>
-                <textarea
-                  value={step.message}
-                  onChange={(e) => updateStep(i, { message: e.target.value })}
-                  rows={2}
-                  placeholder="Mensagem do lembrete…"
-                  className="w-full resize-y rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
-                />
               </div>
             );
           })}
@@ -235,7 +233,7 @@ export function FollowupCard({
             className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-xs font-medium text-muted transition-colors hover:border-secondary/40 hover:text-fg"
           >
             <Plus className="size-4" />
-            Adicionar passo
+            Adicionar tempo
           </button>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
@@ -263,13 +261,11 @@ export function FollowupCard({
                 {error}
               </span>
             ) : null}
-            {enabled ? (
-              <span className="ml-auto text-[11px] text-muted-2">
-                {steps.length} lembrete{steps.length === 1 ? "" : "s"} · ativo
-              </span>
-            ) : (
-              <span className="ml-auto text-[11px] text-muted-2">Desligado</span>
-            )}
+            <span className="ml-auto text-[11px] text-muted-2">
+              {enabled
+                ? `${steps.length} lembrete${steps.length === 1 ? "" : "s"} · ativo`
+                : "Desligado"}
+            </span>
           </div>
         </div>
       )}

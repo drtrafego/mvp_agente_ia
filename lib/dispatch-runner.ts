@@ -1,9 +1,8 @@
 import "server-only";
 import { sql } from "./db";
 import { safeSchema, getAgent } from "./agents";
-import { getLeadSource, getMetaConfig } from "./meta-config";
+import { getLeadSource } from "./meta-config";
 import { sendTemplateToLeads } from "./actions";
-import { sendWhatsappText } from "./clients/meta-whatsapp";
 
 // Máximo de envios por dispatch em cada execução do cron (evita timeout).
 const BATCH = 25;
@@ -185,155 +184,13 @@ async function processAuto(d: SchedRow): Promise<number> {
   return res.enviados;
 }
 
-// ---- Follow-up automático (lembretes em texto livre, janela 72h) ----
-
-const FOLLOWUP_CAP = 40;
-
-type FollowupStep = { delayMinutes: number; message: string };
-
-function parseSteps(v: unknown): FollowupStep[] {
-  if (!Array.isArray(v)) return [];
-  return v
-    .map((s) => {
-      const o = (s ?? {}) as { delayMinutes?: unknown; message?: unknown };
-      return {
-        delayMinutes: Math.round(Number(o.delayMinutes) || 0),
-        message: typeof o.message === "string" ? o.message : "",
-      };
-    })
-    .filter((s) => s.delayMinutes > 0 && s.message.trim().length > 0)
-    .sort((a, b) => a.delayMinutes - b.delayMinutes);
-}
-
-async function processFollowups(): Promise<number> {
-  let sent = 0;
-  let configs: { agent_slug: string; steps: unknown }[] = [];
-  try {
-    configs = await sql.unsafe<{ agent_slug: string; steps: unknown }[]>(
-      `select agent_slug, steps from public.followup_config where enabled = true`,
-    );
-  } catch {
-    return 0; // tabela ainda não existe
-  }
-
-  for (const cfg of configs) {
-    const agent = cfg.agent_slug;
-    if (!getAgent(agent)) continue;
-    const meta = getMetaConfig(agent);
-    if (!meta) continue;
-    const steps = parseSteps(cfg.steps);
-    if (steps.length === 0) continue;
-
-    let schema: string;
-    try {
-      schema = safeSchema(agent);
-    } catch {
-      continue;
-    }
-
-    // Conversas whatsapp cuja última msg do LEAD (T) está na janela de 72h e
-    // já passou do menor delay configurado.
-    let cands: { chat_id: string | null; last_user_ts: string | null }[] = [];
-    try {
-      cands = await sql.unsafe<
-        { chat_id: string | null; last_user_ts: string | null }[]
-      >(
-        `select c.chat_id, mm.last_user_ts
-         from "${schema}".conversations c
-         join lateral (
-           select max(m.ts) filter (where m.role = 'user') as last_user_ts
-           from "${schema}".messages m where m.session_id = c.session_id
-         ) mm on true
-         where coalesce(c.channel, '') not ilike '%mail%'
-           and c.chat_id is not null and c.chat_id <> ''
-           and mm.last_user_ts is not null
-           and mm.last_user_ts >= now() - interval '72 hours'
-           and mm.last_user_ts <= now() - ($1 || ' minutes')::interval
-         order by mm.last_user_ts desc
-         limit ${FOLLOWUP_CAP}`,
-        [String(steps[0].delayMinutes)],
-      );
-    } catch {
-      continue;
-    }
-
-    for (const cand of cands) {
-      if (sent >= FOLLOWUP_CAP) break;
-      const chatId = String(cand.chat_id ?? "").replace(/\D/g, "");
-      const T = cand.last_user_ts;
-      if (!chatId || !T) continue;
-
-      const elapsedMin = (Date.now() - new Date(T).getTime()) / 60000;
-      const due = steps
-        .map((s, i) => ({ ...s, index: i }))
-        .filter((s) => s.delayMinutes <= elapsedMin);
-      if (due.length === 0) continue;
-
-      // step_index já enviados para esse T (mesma janela de silêncio)
-      let sentIdx = new Set<number>();
-      try {
-        const rows = await sql.unsafe<{ step_index: number }[]>(
-          `select step_index from public.followup_sent
-           where agent_slug = $1 and chat_id = $2 and based_on_ts = $3`,
-          [agent, chatId, T],
-        );
-        sentIdx = new Set(rows.map((r) => Number(r.step_index)));
-      } catch {
-        // segue: o índice único abaixo evita duplicar de qualquer forma
-      }
-
-      const next = due.find((s) => !sentIdx.has(s.index));
-      if (!next) continue;
-
-      // Reivindica o passo (dedupe pelo índice único). Se conflitar, pula.
-      const id = `${agent}:${chatId}:${next.index}:${new Date(T).getTime()}:${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      let claimed = false;
-      try {
-        const ins = await sql.unsafe<{ id: string }[]>(
-          `insert into public.followup_sent
-             (id, agent_slug, chat_id, step_index, based_on_ts, sent_at, status)
-           values ($1, $2, $3, $4, $5, now(), 'pending')
-           on conflict (agent_slug, chat_id, step_index, based_on_ts) do nothing
-           returning id`,
-          [id, agent, chatId, next.index, T],
-        );
-        claimed = ins.length > 0;
-      } catch {
-        claimed = false;
-      }
-      if (!claimed) continue;
-
-      const res = await sendWhatsappText(chatId, next.message, meta.phoneNumberId);
-      const status = res.ok
-        ? "sent"
-        : res.outsideWindow
-          ? "window_closed"
-          : "error";
-      try {
-        await sql.unsafe(
-          `update public.followup_sent set status = $2, sent_at = now() where id = $1`,
-          [id, status],
-        );
-      } catch {
-        // best-effort
-      }
-      if (res.ok) sent++;
-    }
-  }
-  return sent;
-}
-
 export async function runDispatches(): Promise<{
   ok: boolean;
   selected: number;
   auto: number;
-  followups: number;
 }> {
   let selected = 0;
   let auto = 0;
-  let followups = 0;
 
   // 'selected' vencidos (scheduled_at <= now)
   try {
@@ -377,12 +234,5 @@ export async function runDispatches(): Promise<{
     // ignora
   }
 
-  // Follow-up automático (lembretes de quem parou de responder)
-  try {
-    followups = await processFollowups();
-  } catch {
-    // ignora
-  }
-
-  return { ok: true, selected, auto, followups };
+  return { ok: true, selected, auto };
 }
