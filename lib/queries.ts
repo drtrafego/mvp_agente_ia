@@ -627,10 +627,11 @@ export type FormLead = {
 };
 
 /**
- * Lê os leads de formulário (public.meta_leads, já escopada por cliente no
- * backend) e cruza com as conversas do agente por telefone (dígitos exatos ou
- * sufixo dos últimos 8) para marcar quem já iniciou conversa no WhatsApp.
- * Também marca quem já recebeu disparo de template (public.outreach_sent).
+ * Lê os leads do agente 'form': meta_leads (escopado por page_id) UNIÃO os
+ * leads CTWA de public.ctwa_referrals que têm conversa no schema do agente
+ * (escopo por agente = só CTWA com conversa; ctwa_referrals não tem page_id).
+ * Dedupe por phone_norm (form tem prioridade, traz mais dados). Marca quem
+ * conversou e quem recebeu disparo (public.outreach_sent).
  * Best-effort: qualquer erro retorna [].
  */
 export async function getFormLeads(slug: string): Promise<FormLead[]> {
@@ -641,7 +642,21 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
   if (ls.leadSource !== "form") return [];
   const pageId = ls.pageId;
   try {
-    const rows = await sql.unsafe<
+    const outreach = await getOutreachMap(slug);
+    const withOutreach = (
+      lead: Omit<FormLead, "templateEnviado" | "ultimoTemplate" | "enviadoEm">,
+    ): FormLead => {
+      const o = lead.phone_norm ? outreach[lead.phone_norm] : undefined;
+      return {
+        ...lead,
+        templateEnviado: !!o,
+        ultimoTemplate: o?.template ?? null,
+        enviadoEm: o?.sentAt ?? null,
+      };
+    };
+
+    // ---- Leads de formulário (meta_leads, page-scoped) ----
+    const formRows = await sql.unsafe<
       (Omit<
         FormLead,
         | "conversou"
@@ -675,18 +690,78 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
       [pageId],
     );
 
-    const outreach = await getOutreachMap(slug);
-
-    return rows.map(({ conv_session_id, ...rest }) => {
-      const o = rest.phone_norm ? outreach[rest.phone_norm] : undefined;
-      return {
+    const formLeads: FormLead[] = formRows.map(({ conv_session_id, ...rest }) =>
+      withOutreach({
         ...rest,
         conversou: conv_session_id != null,
         session_id: conv_session_id,
-        templateEnviado: !!o,
-        ultimoTemplate: o?.template ?? null,
-        enviadoEm: o?.sentAt ?? null,
-      };
+      }),
+    );
+    const seen = new Set(
+      formLeads.map((l) => l.phone_norm).filter(Boolean) as string[],
+    );
+
+    // ---- Leads CTWA (ctwa_referrals com conversa no schema do agente) ----
+    const ctwaRows = await sql.unsafe<
+      {
+        phone_norm: string | null;
+        ad_name: string | null;
+        adset_name: string | null;
+        campaign_name: string | null;
+        created_time: string | null;
+        conv_session_id: string | null;
+        conv_title: string | null;
+      }[]
+    >(
+      `select distinct on (r.phone_norm)
+              r.phone_norm, r.ad_name, r.adset_name, r.campaign_name,
+              to_timestamp(r.ts) as created_time,
+              conv.session_id as conv_session_id,
+              conv.title as conv_title
+       from public.ctwa_referrals r
+       join lateral (
+         select c.session_id, c.title
+         from "${schema}".conversations c
+         where r.phone_norm is not null and r.phone_norm <> '' and (
+           regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = r.phone_norm
+           or (
+             length(r.phone_norm) >= 8
+             and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                 = right(r.phone_norm, 8)
+           )
+         )
+         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         limit 1
+       ) conv on true
+       order by r.phone_norm, r.ts desc`,
+    );
+
+    const ctwaLeads: FormLead[] = ctwaRows
+      .filter((r) => r.phone_norm && !seen.has(r.phone_norm))
+      .map((r) =>
+        withOutreach({
+          lead_id: null,
+          created_time: r.created_time,
+          page_name: null,
+          form_name: null,
+          campaign_name: r.campaign_name,
+          adset_name: r.adset_name,
+          ad_name: r.ad_name,
+          platform: "ctwa",
+          full_name: r.conv_title ?? null,
+          phone: r.phone_norm,
+          phone_norm: r.phone_norm,
+          email: null,
+          field_data: null,
+          conversou: true, // CTWA sempre mandou msg
+          session_id: r.conv_session_id,
+        }),
+      );
+
+    return [...formLeads, ...ctwaLeads].sort((a, b) => {
+      const da = a.created_time ? new Date(a.created_time).getTime() : 0;
+      const db = b.created_time ? new Date(b.created_time).getTime() : 0;
+      return db - da;
     });
   } catch {
     return [];

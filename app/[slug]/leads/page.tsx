@@ -34,10 +34,10 @@ export default async function LeadsPage({
         title="Leads"
         subtitle={
           leads.length
-            ? `${formatNumber(leads.length)} leads de formulário · ${formatNumber(
+            ? `${formatNumber(leads.length)} leads (formulário + anúncio) · ${formatNumber(
                 converted,
               )} já conversaram`
-            : "Leads capturados pelos formulários Meta"
+            : "Leads capturados por formulário e anúncio (Click-to-WhatsApp)"
         }
       />
 
