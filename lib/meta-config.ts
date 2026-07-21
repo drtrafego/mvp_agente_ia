@@ -14,11 +14,25 @@ const CONFIG: Record<string, MetaAgentConfig> = {
     phoneNumberId: "414594695067374",
     wabaId: "404364559427067",
   },
-  // drlucas: sem número oficial — envio desabilitado.
+  drlucas: {
+    phoneNumberId: "1238137526046869",
+    wabaId: "1014360307867907",
+  },
 };
 
 export function getMetaConfig(slug: string): MetaAgentConfig | null {
   return CONFIG[slug] ?? null;
+}
+
+// Token da Meta por agente. drlucas usa um app/token próprio; os demais
+// compartilham META_ACCESS_TOKEN.
+const TOKEN_ENV: Record<string, string> = {
+  drlucas: "META_ACCESS_TOKEN_DRLUCAS",
+};
+
+export function getMetaToken(slug: string): string | null {
+  const envName = TOKEN_ENV[slug] ?? "META_ACCESS_TOKEN";
+  return process.env[envName]?.trim() || null;
 }
 
 // Fonte de leads por agente — evita misturar dados entre agentes no dashboard.

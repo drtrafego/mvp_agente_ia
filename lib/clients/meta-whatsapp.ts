@@ -38,10 +38,6 @@ function countVars(text: string): number {
 
 const GRAPH = "https://graph.facebook.com";
 
-function token(): string | null {
-  return process.env.META_ACCESS_TOKEN?.trim() || null;
-}
-
 /** Interpreta o corpo de erro da Graph API e detecta a janela de 24h. */
 function parseMetaError(errText: string, status: number): {
   message: string;
@@ -81,13 +77,14 @@ function parseMetaError(errText: string, status: number): {
 async function postMessage(
   phoneNumberId: string,
   body: Record<string, unknown>,
+  token: string | null,
 ): Promise<MetaSendResult> {
-  const t = token();
+  const t = token;
   if (!t) {
     return {
       ok: false,
       messageId: "",
-      error: "META_ACCESS_TOKEN não configurado no servidor.",
+      error: "Token da Meta não configurado para este agente.",
     };
   }
   const to = String(body.to ?? "").replace(/^\+/, "");
@@ -124,13 +121,18 @@ export async function sendWhatsappText(
   phone: string,
   text: string,
   phoneNumberId: string,
+  token: string | null,
 ): Promise<MetaSendResult> {
-  return postMessage(phoneNumberId, {
-    messaging_product: "whatsapp",
-    to: phone,
-    type: "text",
-    text: { body: text },
-  });
+  return postMessage(
+    phoneNumberId,
+    {
+      messaging_product: "whatsapp",
+      to: phone,
+      type: "text",
+      text: { body: text },
+    },
+    token,
+  );
 }
 
 export async function sendWhatsappTemplate(
@@ -139,31 +141,37 @@ export async function sendWhatsappTemplate(
   lang: string,
   bodyParams: string[],
   phoneNumberId: string,
+  token: string | null,
 ): Promise<MetaSendResult> {
-  return postMessage(phoneNumberId, {
-    messaging_product: "whatsapp",
-    to: phone,
-    type: "template",
-    template: {
-      name: templateName,
-      language: { code: lang },
-      components: bodyParams.length
-        ? [
-            {
-              type: "body",
-              parameters: bodyParams.map((t) => ({ type: "text", text: t })),
-            },
-          ]
-        : [],
+  return postMessage(
+    phoneNumberId,
+    {
+      messaging_product: "whatsapp",
+      to: phone,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: lang },
+        components: bodyParams.length
+          ? [
+              {
+                type: "body",
+                parameters: bodyParams.map((t) => ({ type: "text", text: t })),
+              },
+            ]
+          : [],
+      },
     },
-  });
+    token,
+  );
 }
 
 /** Lista os templates APROVADOS de uma WABA. Best-effort: erro → []. */
 export async function listApprovedTemplates(
   wabaId: string,
+  token: string | null,
 ): Promise<ApprovedTemplate[]> {
-  const t = token();
+  const t = token;
   if (!t || !wabaId) return [];
   const url = `${GRAPH}/${META_GRAPH_VERSION}/${wabaId}/message_templates?fields=name,status,language,category,components&limit=200`;
   try {

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import { getAgent } from "./agents";
-import { getMetaConfig } from "./meta-config";
+import { getMetaConfig, getMetaToken } from "./meta-config";
 import {
   sendWhatsappText,
   sendWhatsappTemplate,
@@ -120,8 +120,15 @@ export async function sendReplyAction(
         error: "Este agente não tem número de WhatsApp oficial configurado.",
       };
     }
+    const token = getMetaToken(slug);
+    if (!token) {
+      return {
+        ok: false,
+        error: "Este agente não tem número de WhatsApp oficial configurado.",
+      };
+    }
 
-    const r = await sendWhatsappText(chatId, msg, cfg.phoneNumberId);
+    const r = await sendWhatsappText(chatId, msg, cfg.phoneNumberId, token);
     if (!r.ok) {
       return {
         ok: false,
@@ -156,6 +163,13 @@ export async function sendTemplateAction(
         error: "Este agente não tem número de WhatsApp oficial configurado.",
       };
     }
+    const token = getMetaToken(slug);
+    if (!token) {
+      return {
+        ok: false,
+        error: "Este agente não tem número de WhatsApp oficial configurado.",
+      };
+    }
 
     const clean = params.map((p) => p.trim()).filter(Boolean);
     const r = await sendWhatsappTemplate(
@@ -164,6 +178,7 @@ export async function sendTemplateAction(
       lang || "pt_BR",
       clean,
       cfg.phoneNumberId,
+      token,
     );
     if (!r.ok) {
       return {
@@ -184,7 +199,7 @@ export async function getApprovedTemplates(
   try {
     const cfg = getMetaConfig(slug);
     if (!cfg) return [];
-    return await listApprovedTemplates(cfg.wabaId);
+    return await listApprovedTemplates(cfg.wabaId, getMetaToken(slug));
   } catch {
     return [];
   }
@@ -252,6 +267,9 @@ export async function sendTemplateToLeads(
     const cfg = getMetaConfig(slug);
     if (!cfg)
       return fail("Este agente não tem número de WhatsApp oficial configurado.");
+    const token = getMetaToken(slug);
+    if (!token)
+      return fail("Este agente não tem número de WhatsApp oficial configurado.");
     if (!templateName) return fail("Selecione um template.");
     if (!Array.isArray(targets) || targets.length === 0)
       return fail("Nenhum lead selecionado.");
@@ -297,6 +315,7 @@ export async function sendTemplateToLeads(
         lang || "pt_BR",
         bodyParams,
         cfg.phoneNumberId,
+        token,
       );
 
       const id = `${slug}:${phone}:${Date.now()}:${Math.random()
