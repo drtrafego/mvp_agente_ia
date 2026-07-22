@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   ArrowUpRight,
   Bot,
+  Building2,
   Sparkles,
   DollarSign,
   MessageSquare,
@@ -9,6 +10,7 @@ import {
   Activity,
 } from "lucide-react";
 import { assertOrgAccess, getOrgAgents } from "@/lib/access";
+import { PortalLink } from "@/components/portal-link";
 import { getPortalStats } from "@/lib/queries";
 import { formatUSD, formatNumber, timeAgo } from "@/lib/utils";
 
@@ -62,6 +64,17 @@ export default async function OrgPage({
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+      <div className="mb-6 flex items-center gap-2">
+        <PortalLink className="-ml-3" />
+        <Link
+          href="/"
+          className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-muted-2 transition-colors hover:bg-surface-2 hover:text-fg"
+        >
+          <Building2 className="size-4 shrink-0" />
+          Trocar empresa
+        </Link>
+      </div>
+
       <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="animate-fade-up">
           <div className="mb-3 flex items-center gap-2.5">

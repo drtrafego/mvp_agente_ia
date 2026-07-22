@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PortalLink } from "@/components/portal-link";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
@@ -212,7 +213,8 @@ export function AppShell({
 
         <NavList basePath={basePath} collapsed={collapsed} />
 
-        <div className="mt-auto flex flex-col gap-3">
+        <div className="mt-auto flex flex-col gap-1.5">
+          <PortalLink collapsed={collapsed} />
           <button
             onClick={toggleCollapsed}
             title={collapsed ? "Expandir" : "Recolher"}
@@ -285,13 +287,16 @@ export function AppShell({
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
             />
-            <Link
-              href={orgPath}
-              onClick={() => setMobileOpen(false)}
-              className="mt-auto flex items-center gap-1.5 px-2 py-1 text-xs text-muted-2 hover:text-fg"
-            >
-              <ChevronLeft className="size-3.5" /> Todos os agentes
-            </Link>
+            <div className="mt-auto flex flex-col gap-1">
+              <Link
+                href={orgPath}
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-2 hover:text-fg"
+              >
+                <ChevronLeft className="size-3.5" /> Todos os agentes
+              </Link>
+              <PortalLink onNavigate={() => setMobileOpen(false)} />
+            </div>
           </div>
         </div>
       ) : null}

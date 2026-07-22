@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowUpRight, Building2, ShieldAlert, Sparkles } from "lucide-react";
 import { getSessionEmail, getUserOrgs } from "@/lib/access";
+import { PortalLink } from "@/components/portal-link";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export default async function PortalPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-10 sm:px-8 sm:py-14">
+      <div className="mb-6">
+        <PortalLink className="-ml-3" />
+      </div>
+
       <header className="mb-10 animate-fade-up">
         <div className="mb-3 flex items-center gap-2.5">
           <div className="grid size-9 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
