@@ -723,6 +723,139 @@ export async function setAutoRecovery(
   }
 }
 
+// ---- Horários de atendimento + webhook CRM (agenda_config.json) -----
+
+// Config vive DENTRO do container do bot (/opt/data/agenda_config.json) e é
+// lida/escrita pela control API (/api/agenda-config). Mesmo padrão do pausar.
+// Chaves de dia: "0"=domingo .. "6"=sábado.
+export type AgendaRange = [string, string];
+export type AgendaConfig = {
+  timezone: string;
+  slotMinutes: number;
+  hours: Record<string, AgendaRange[]>;
+  webhook: { enabled: boolean; url: string };
+};
+
+const EMPTY_HOURS: Record<string, AgendaRange[]> = {
+  "0": [],
+  "1": [],
+  "2": [],
+  "3": [],
+  "4": [],
+  "5": [],
+  "6": [],
+};
+
+const DEFAULT_AGENDA: AgendaConfig = {
+  timezone: "-03:00",
+  slotMinutes: 30,
+  hours: {
+    ...EMPTY_HOURS,
+    "1": [["08:00", "12:00"]],
+    "2": [["08:00", "12:00"]],
+    "3": [["08:00", "12:00"]],
+    "4": [["08:00", "12:00"]],
+    "5": [["08:00", "12:00"]],
+  },
+  webhook: { enabled: false, url: "" },
+};
+
+function isHHMM(s: unknown): s is string {
+  if (typeof s !== "string" || s.length !== 5) return false;
+  const [h, m] = s.split(":");
+  const hh = Number(h);
+  const mm = Number(m);
+  return Number.isInteger(hh) && Number.isInteger(mm) && hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59;
+}
+
+// Wire (control API, snake_case) -> AgendaConfig (camelCase), com defaults.
+function normalizeAgenda(raw: unknown): AgendaConfig {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const hoursRaw = (o.hours ?? {}) as Record<string, unknown>;
+  const hours: Record<string, AgendaRange[]> = { ...EMPTY_HOURS };
+  for (const k of Object.keys(EMPTY_HOURS)) {
+    const list = hoursRaw[k];
+    const clean: AgendaRange[] = [];
+    if (Array.isArray(list)) {
+      for (const r of list) {
+        if (Array.isArray(r) && r.length === 2 && isHHMM(r[0]) && isHHMM(r[1]) && r[0] < r[1]) {
+          clean.push([r[0], r[1]]);
+        }
+      }
+    }
+    hours[k] = clean;
+  }
+  const wh = (o.webhook ?? {}) as Record<string, unknown>;
+  const url = String(wh.url ?? "").trim();
+  let slot = Number(o.slot_minutes ?? 30);
+  if (![10, 15, 20, 30, 45, 60].includes(slot)) slot = 30;
+  return {
+    timezone: String(o.timezone ?? "-03:00"),
+    slotMinutes: slot,
+    hours,
+    webhook: {
+      enabled: !!wh.enabled && /^https?:\/\//.test(url),
+      url,
+    },
+  };
+}
+
+export async function getAgendaConfig(slug: string): Promise<AgendaConfig> {
+  await assertAgentAccess(slug);
+  try {
+    const res = await callPanel(
+      `/api/agenda-config?agente=${encodeURIComponent(slug)}`,
+      { method: "GET" },
+    );
+    if (!res.ok) return DEFAULT_AGENDA;
+    const cfg = (res.data as { config?: unknown } | null)?.config;
+    return normalizeAgenda(cfg);
+  } catch {
+    return DEFAULT_AGENDA;
+  }
+}
+
+export async function saveAgendaConfig(
+  slug: string,
+  input: AgendaConfig,
+): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
+  try {
+    const normalized = normalizeAgenda({
+      timezone: input.timezone,
+      slot_minutes: input.slotMinutes,
+      hours: input.hours,
+      webhook: input.webhook,
+    });
+    const url = normalized.webhook.url.trim();
+    if (input.webhook.enabled && !/^https?:\/\//.test(url)) {
+      return {
+        ok: false,
+        error: "URL do webhook inválida (precisa começar com http:// ou https://).",
+      };
+    }
+    // Monta o corpo no formato da control API (snake_case).
+    const wireConfig = {
+      timezone: normalized.timezone,
+      slot_minutes: normalized.slotMinutes,
+      hours: normalized.hours,
+      webhook: {
+        enabled: input.webhook.enabled && /^https?:\/\//.test(url),
+        url,
+      },
+    };
+    const res = await callPanel("/api/agenda-config", {
+      method: "POST",
+      body: JSON.stringify({ agente: slug, config: wireConfig }),
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    revalidatePath(agentPath(agent, "/horarios"));
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro ao salvar os horários." };
+  }
+}
+
 // ---- Follow-up automático (lembretes quando o lead para) ------------
 
 // Follow-up CONTEXTUAL: a Nina escreve cada lembrete lendo a conversa.

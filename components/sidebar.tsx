@@ -9,6 +9,7 @@ import {
   MessageSquareText,
   Megaphone,
   Send,
+  CalendarClock,
   Users,
   KanbanSquare,
   Sparkles,
@@ -53,6 +54,11 @@ function buildNav(basePath: string): NavItem[] {
       href: `${basePath}/disparos`,
       label: "Disparos",
       icon: <Send className="size-[18px]" />,
+    },
+    {
+      href: `${basePath}/horarios`,
+      label: "Horários",
+      icon: <CalendarClock className="size-[18px]" />,
     },
     {
       href: `${basePath}/pipeline`,
