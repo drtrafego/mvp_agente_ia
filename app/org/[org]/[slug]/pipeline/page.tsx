@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Info, Sparkles } from "lucide-react";
 import { getLeads, STAGES, type Stage, type Lead } from "@/lib/queries";
+import { assertAgentAccess } from "@/lib/access";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { Badge } from "@/components/ui";
@@ -22,9 +23,11 @@ const STAGE_META: Record<
 export default async function PipelinePage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ org: string; slug: string }>;
 }) {
-  const { slug } = await params;
+  const { org, slug } = await params;
+  await assertAgentAccess(slug);
+  const basePath = `/org/${org}/${slug}`;
   const board = await getLeads(slug);
   const total = STAGES.reduce((s, st) => s + board[st].length, 0);
 
@@ -52,7 +55,7 @@ export default async function PipelinePage({
         <>
           <div className="grid animate-fade-up gap-4 md:grid-cols-2 xl:grid-cols-4">
             {STAGES.map((stage) => (
-              <Column key={stage} slug={slug} stage={stage} leads={board[stage]} />
+              <Column key={stage} basePath={basePath} stage={stage} leads={board[stage]} />
             ))}
           </div>
           <p className="mt-5 flex items-center gap-1.5 text-xs text-muted-2">
@@ -67,11 +70,11 @@ export default async function PipelinePage({
 }
 
 function Column({
-  slug,
+  basePath,
   stage,
   leads,
 }: {
-  slug: string;
+  basePath: string;
   stage: Stage;
   leads: Lead[];
 }) {
@@ -92,7 +95,7 @@ function Column({
           leads.map((lead) => (
             <Link
               key={lead.session_id}
-              href={`/${slug}/conversas?c=${encodeURIComponent(lead.session_id)}`}
+              href={`${basePath}/conversas?c=${encodeURIComponent(lead.session_id)}`}
               className="group rounded-lg border border-border bg-surface p-3 shadow-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-secondary/40 hover:bg-surface-2"
             >
               <p className="line-clamp-2 text-sm font-medium leading-snug">

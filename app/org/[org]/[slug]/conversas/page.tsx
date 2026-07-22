@@ -20,6 +20,7 @@ import { OutreachChat } from "@/components/outreach-chat";
 import { DispatchView } from "@/components/dispatch-view";
 import { LeadCard } from "@/components/lead-card";
 import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
+import { assertAgentAccess } from "@/lib/access";
 import { getMetaConfig } from "@/lib/meta-config";
 import { cn, formatNumber, timeAgo } from "@/lib/utils";
 
@@ -51,7 +52,7 @@ export default async function ConversasPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ org: string; slug: string }>;
   searchParams: Promise<{
     c?: string;
     o?: string;
@@ -60,8 +61,11 @@ export default async function ConversasPage({
     f?: string;
   }>;
 }) {
-  const { slug } = await params;
+  const { org, slug } = await params;
   const { c, o, d, ch: chParam, f: fParam } = await searchParams;
+  // Gate de acesso antes de qualquer consulta desta tela.
+  const agent = await assertAgentAccess(slug);
+  const basePath = `/org/${org}/${slug}`;
   const ch: ConvChannel = chParam === "email" ? "email" : "whatsapp";
   const filter: ConvFilter =
     fParam === "ativas24h" || fParam === "responderam" ? fParam : "all";
@@ -86,7 +90,7 @@ export default async function ConversasPage({
     ? paused.includes(selectedBot.chat_id)
     : false;
   const lead = selectedBot ? await getLeadForConversation(selectedBot) : null;
-  const sendEnabled = !!getMetaConfig(slug);
+  const sendEnabled = !!getMetaConfig(agent);
   const templates =
     selectedBot && sendEnabled ? await getApprovedTemplates(slug) : [];
   const outreachMessages = selectedOutreach
@@ -98,7 +102,7 @@ export default async function ConversasPage({
     ...botConvos.map((cv) => ({
       key: `b-${cv.session_id}`,
       kind: "bot" as const,
-      href: `/${slug}/conversas?ch=${ch}${fq}&c=${encodeURIComponent(cv.session_id)}`,
+      href: `${basePath}/conversas?ch=${ch}${fq}&c=${encodeURIComponent(cv.session_id)}`,
       active: selectedBot?.session_id === cv.session_id,
       title: cv.title ?? "Conversa sem título",
       handle: cv.chat_id,
@@ -109,7 +113,7 @@ export default async function ConversasPage({
     ...outreachConvos.map((oc) => ({
       key: `o-${oc.id}`,
       kind: "outreach" as const,
-      href: `/${slug}/conversas?ch=${ch}${fq}&o=${encodeURIComponent(oc.id)}`,
+      href: `${basePath}/conversas?ch=${ch}${fq}&o=${encodeURIComponent(oc.id)}`,
       active: selectedOutreach?.id === oc.id,
       title: oc.lead_name ?? oc.lead_handle ?? "Lead",
       handle: oc.lead_handle,
@@ -120,7 +124,7 @@ export default async function ConversasPage({
     ...dispatchConvos.map((dc) => ({
       key: `d-${dc.phone_norm}`,
       kind: "dispatch" as const,
-      href: `/${slug}/conversas?ch=${ch}${fq}&d=${encodeURIComponent(dc.phone_norm)}`,
+      href: `${basePath}/conversas?ch=${ch}${fq}&d=${encodeURIComponent(dc.phone_norm)}`,
       active: selectedDispatch?.phone_norm === dc.phone_norm,
       title: dc.full_name ?? dc.phone_norm,
       handle: dc.phone_norm,
@@ -146,8 +150,8 @@ export default async function ConversasPage({
       </div>
 
       <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <ChannelTabs slug={slug} ch={ch} filter={filter} />
-        <FilterChips slug={slug} ch={ch} filter={filter} />
+        <ChannelTabs basePath={basePath} ch={ch} filter={filter} />
+        <FilterChips basePath={basePath} ch={ch} filter={filter} />
       </div>
 
       <div className="flex min-h-0 flex-1 gap-3">
@@ -210,6 +214,7 @@ export default async function ConversasPage({
             <div className="min-h-0 flex-1">
               <ChatView
                 slug={slug}
+                basePath={basePath}
                 conversation={selectedBot}
                 messages={messages}
                 isPaused={isPaused}
@@ -220,7 +225,7 @@ export default async function ConversasPage({
           ) : selectedOutreach ? (
             <div className="min-h-0 flex-1">
               <OutreachChat
-                slug={slug}
+                basePath={basePath}
                 ch={ch}
                 convo={selectedOutreach}
                 messages={outreachMessages}
@@ -228,7 +233,7 @@ export default async function ConversasPage({
             </div>
           ) : selectedDispatch ? (
             <div className="min-h-0 flex-1">
-              <DispatchView slug={slug} ch={ch} detail={selectedDispatch} />
+              <DispatchView basePath={basePath} ch={ch} detail={selectedDispatch} />
             </div>
           ) : (
             <Placeholder />
@@ -247,11 +252,11 @@ export default async function ConversasPage({
 }
 
 function ChannelTabs({
-  slug,
+  basePath,
   ch,
   filter,
 }: {
-  slug: string;
+  basePath: string;
   ch: ConvChannel;
   filter: ConvFilter;
 }) {
@@ -267,7 +272,7 @@ function ChannelTabs({
         return (
           <Link
             key={t.key}
-            href={`/${slug}/conversas?ch=${t.key}${fq}`}
+            href={`${basePath}/conversas?ch=${t.key}${fq}`}
             scroll={false}
             className={cn(
               "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-medium transition-colors sm:flex-none",
@@ -286,11 +291,11 @@ function ChannelTabs({
 }
 
 function FilterChips({
-  slug,
+  basePath,
   ch,
   filter,
 }: {
-  slug: string;
+  basePath: string;
   ch: ConvChannel;
   filter: ConvFilter;
 }) {
@@ -307,7 +312,7 @@ function FilterChips({
         return (
           <Link
             key={chip.key}
-            href={`/${slug}/conversas?ch=${ch}${fq}`}
+            href={`${basePath}/conversas?ch=${ch}${fq}`}
             scroll={false}
             className={cn(
               "shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition-colors",

@@ -4,20 +4,20 @@ import { queryFromSearchParams, resolveLegacyTarget } from "@/lib/legacy-routes"
 export const dynamic = "force-dynamic";
 
 /**
- * Rota antiga /[slug]. Só redireciona, não renderiza tela: a única fonte de
- * verdade da UI é app/org/[org]/[slug]. Sai na Fase 7.
+ * Sub rotas antigas /[slug]/conversas, /[slug]/leads e companhia. Preserva o
+ * caminho e a querystring no redirect 308. Sai na Fase 7.
  */
-export default async function LegacyAgentPage({
+export default async function LegacyAgentSubPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ slug: string; rest: string[] }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { slug } = await params;
+  const { slug, rest } = await params;
   const query = queryFromSearchParams(await searchParams);
 
-  const target = await resolveLegacyTarget(slug, [], query);
+  const target = await resolveLegacyTarget(slug, rest ?? [], query);
   if (target.kind === "notFound") notFound();
   if (target.kind === "list") redirect("/");
   permanentRedirect(target.path);

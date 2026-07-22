@@ -1,6 +1,7 @@
 import "server-only";
 import { sql } from "./db";
-import { AGENTS, safeSchema } from "./agents";
+import { getAgent, requireAgent, safeSchema, type Agent } from "./agents";
+import { assertIdent } from "./identifier";
 import { getLeadSource } from "./meta-config";
 
 export type PortalStat = {
@@ -11,10 +12,13 @@ export type PortalStat = {
   lastActivity: string | null;
 };
 
-export async function getPortalStats(): Promise<Record<string, PortalStat>> {
+/** Recebe a lista de agentes já resolvida pelo catálogo (public.agents). */
+export async function getPortalStats(
+  agents: Agent[],
+): Promise<Record<string, PortalStat>> {
   const entries = await Promise.all(
-    AGENTS.map(async (a) => {
-      const schema = safeSchema(a.slug);
+    agents.map(async (a) => {
+      const schema = assertIdent(a.schema);
       try {
         const [row] = await sql.unsafe<
           { conversations: number; cost: string | null; last: string | null }[]
@@ -59,7 +63,7 @@ export type Overview = {
 };
 
 export async function getOverview(slug: string): Promise<Overview> {
-  const schema = safeSchema(slug);
+  const schema = await safeSchema(slug);
 
   const [kpis] = await sql.unsafe<
     {
@@ -124,7 +128,7 @@ export type ConversationRow = {
 };
 
 export async function getConversations(slug: string): Promise<ConversationRow[]> {
-  const schema = safeSchema(slug);
+  const schema = await safeSchema(slug);
   return sql.unsafe<ConversationRow[]>(
     `select session_id, chat_id, channel, title, started_at, ended_at,
             message_count, cost_usd
@@ -144,7 +148,7 @@ export async function getMessages(
   slug: string,
   sessionId: string,
 ): Promise<MessageRow[]> {
-  const schema = safeSchema(slug);
+  const schema = await safeSchema(slug);
   return sql.unsafe<MessageRow[]>(
     `select id, role, content, ts
      from "${schema}".messages
@@ -158,7 +162,7 @@ export async function getConversation(
   slug: string,
   sessionId: string,
 ): Promise<ConversationRow | null> {
-  const schema = safeSchema(slug);
+  const schema = await safeSchema(slug);
   const [row] = await sql.unsafe<ConversationRow[]>(
     `select session_id, chat_id, channel, title, started_at, ended_at,
             message_count, cost_usd
@@ -190,7 +194,7 @@ export async function getBotConversations(
   channel: ConvChannel,
   filter: ConvFilter = "all",
 ): Promise<BotConvRow[]> {
-  const schema = safeSchema(slug);
+  const schema = await safeSchema(slug);
   const conds: string[] = [
     channel === "email"
       ? "c.channel ilike '%mail%'"
@@ -366,8 +370,9 @@ export async function getDispatchConvos(
   filter: ConvFilter = "all",
 ): Promise<DispatchConvo[]> {
   if (channel !== "whatsapp" || filter !== "all") return [];
-  const schema = safeSchema(slug);
-  const src = getLeadSource(slug);
+  const agent = await requireAgent(slug);
+  const schema = assertIdent(agent.schema);
+  const src = getLeadSource(agent);
   const nameJoin =
     src.leadSource === "form"
       ? `left join lateral (
@@ -410,7 +415,7 @@ export async function getDispatchConvo(
   slug: string,
   phoneNorm: string,
 ): Promise<DispatchDetail | null> {
-  const src = getLeadSource(slug);
+  const src = getLeadSource(await getAgent(slug));
   try {
     const [os] = await sql.unsafe<
       { phone_norm: string; template_name: string | null; sent_at: string | null }[]
@@ -635,10 +640,10 @@ export type FormLead = {
  * Best-effort: qualquer erro retorna [].
  */
 export async function getFormLeads(slug: string): Promise<FormLead[]> {
-  const schema = safeSchema(slug);
+  const schema = await safeSchema(slug);
   // Só agentes com fonte de FORMULÁRIO têm leads aqui, ESCOPADOS pela página
   // do agente (nunca misturar clientes). Outros (outreach/none) = sem leads de form.
-  const ls = getLeadSource(slug);
+  const ls = getLeadSource(await getAgent(slug));
   if (ls.leadSource !== "form") return [];
   const pageId = ls.pageId;
   try {
@@ -982,8 +987,9 @@ export async function getDashboard(
   slug: string,
   period: Period,
 ): Promise<DashboardData> {
-  const schema = safeSchema(slug);
-  const src = getLeadSource(slug);
+  const agent = await requireAgent(slug);
+  const schema = assertIdent(agent.schema);
+  const src = getLeadSource(agent);
   const { curStart, curEnd, prevStart, prevEnd, todayStart } =
     periodRange(period);
 

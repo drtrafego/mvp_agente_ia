@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
 import { UserPlus } from "lucide-react";
-import { getAgent } from "@/lib/agents";
+import { assertAgentAccess } from "@/lib/access";
 import { getFormLeads } from "@/lib/queries";
 import { getApprovedTemplates, listCampaigns } from "@/lib/actions";
 import { getMetaConfig } from "@/lib/meta-config";
@@ -14,15 +13,15 @@ export const dynamic = "force-dynamic";
 export default async function LeadsPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ org: string; slug: string }>;
 }) {
-  const { slug } = await params;
-  const agent = getAgent(slug);
-  if (!agent) notFound();
+  const { org, slug } = await params;
+  const agent = await assertAgentAccess(slug);
+  const basePath = `/org/${org}/${slug}`;
 
   const leads = await getFormLeads(slug);
   const converted = leads.filter((l) => l.conversou).length;
-  const sendEnabled = !!getMetaConfig(slug);
+  const sendEnabled = !!getMetaConfig(agent);
   const [templates, campaigns] = await Promise.all([
     sendEnabled ? getApprovedTemplates(slug) : Promise.resolve([]),
     listCampaigns(slug),
@@ -46,6 +45,7 @@ export default async function LeadsPage({
       ) : (
         <LeadList
           slug={slug}
+          basePath={basePath}
           leads={leads}
           templates={templates}
           campaigns={campaigns}

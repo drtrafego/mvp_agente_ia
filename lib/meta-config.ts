@@ -1,52 +1,64 @@
-// Config de backend da WhatsApp Cloud API por agente.
-// phoneNumberId e wabaId ficam no código; só o token é env (META_ACCESS_TOKEN).
+import "server-only";
+import type { Agent } from "./agents";
+import { decryptSecret } from "./crypto";
+
+// Config de backend da WhatsApp Cloud API por agente. phoneNumberId, wabaId,
+// token e fonte de leads saíram do código e vêm do catálogo (public.agents).
 export const META_GRAPH_VERSION =
   process.env.META_GRAPH_VERSION?.trim() || "v21.0";
 
 export type MetaAgentConfig = { phoneNumberId: string; wabaId: string };
 
-const CONFIG: Record<string, MetaAgentConfig> = {
-  agente24horas: {
-    phoneNumberId: "115216611574100",
-    wabaId: "106071169159774",
-  },
-  casaldotrafego: {
-    phoneNumberId: "414594695067374",
-    wabaId: "404364559427067",
-  },
-  drlucas: {
-    phoneNumberId: "1238137526046869",
-    wabaId: "1014360307867907",
-  },
-};
-
-export function getMetaConfig(slug: string): MetaAgentConfig | null {
-  return CONFIG[slug] ?? null;
+/**
+ * Número oficial do agente. Só existe quando phone_number_id e waba_id estão
+ * os dois preenchidos (o CHECK agents_meta_pair_ck garante isso no banco).
+ */
+export function getMetaConfig(
+  agent: Agent | null | undefined,
+): MetaAgentConfig | null {
+  const phoneNumberId = agent?.metaPhoneNumberId?.trim();
+  const wabaId = agent?.metaWabaId?.trim();
+  if (!phoneNumberId || !wabaId) return null;
+  return { phoneNumberId, wabaId };
 }
 
-// Token da Meta por agente. drlucas usa um app/token próprio; os demais
-// compartilham META_ACCESS_TOKEN.
-const TOKEN_ENV: Record<string, string> = {
-  drlucas: "META_ACCESS_TOKEN_DRLUCAS",
-};
+/**
+ * Token da Meta do agente, nesta ordem:
+ *   1. meta_token_cipher decifrado com AGENTS_SECRET_KEY (agentes novos);
+ *   2. env nomeada em meta_token_env (META_ACCESS_TOKEN_DRLUCAS, por exemplo);
+ *   3. META_ACCESS_TOKEN.
+ * Os passos 2 e 3 são o fallback que mantém os 3 agentes atuais funcionando
+ * sem migrar segredo.
+ */
+export function getMetaToken(agent: Agent | null | undefined): string | null {
+  if (!agent) return null;
 
-export function getMetaToken(slug: string): string | null {
-  const envName = TOKEN_ENV[slug] ?? "META_ACCESS_TOKEN";
-  return process.env[envName]?.trim() || null;
+  const fromCipher = decryptSecret(agent.metaTokenCipher);
+  if (fromCipher) return fromCipher;
+
+  const envName = agent.metaTokenEnv?.trim();
+  if (envName) {
+    const fromEnv = process.env[envName]?.trim();
+    if (fromEnv) return fromEnv;
+  }
+
+  return process.env.META_ACCESS_TOKEN?.trim() || null;
 }
 
-// Fonte de leads por agente — evita misturar dados entre agentes no dashboard.
+// Fonte de leads por agente, evita misturar dados entre agentes no dashboard.
 export type LeadSource =
   | { leadSource: "form"; pageId: string }
   | { leadSource: "outreach" }
   | { leadSource: "none" };
 
-const LEAD_SOURCE: Record<string, LeadSource> = {
-  agente24horas: { leadSource: "form", pageId: "109902140539351" },
-  casaldotrafego: { leadSource: "outreach" },
-  drlucas: { leadSource: "none" },
-};
-
-export function getLeadSource(slug: string): LeadSource {
-  return LEAD_SOURCE[slug] ?? { leadSource: "none" };
+export function getLeadSource(agent: Agent | null | undefined): LeadSource {
+  if (!agent) return { leadSource: "none" };
+  if (agent.leadSource === "form") {
+    const pageId = agent.leadSourcePageId?.trim();
+    // Sem page_id não dá para escopar o formulário, então some a fonte em vez
+    // de arriscar ler lead de outra página.
+    return pageId ? { leadSource: "form", pageId } : { leadSource: "none" };
+  }
+  if (agent.leadSource === "outreach") return { leadSource: "outreach" };
+  return { leadSource: "none" };
 }

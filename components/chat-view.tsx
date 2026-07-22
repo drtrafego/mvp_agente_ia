@@ -9,6 +9,7 @@ import { formatDateTime, formatUSD } from "@/lib/utils";
 
 export function ChatView({
   slug,
+  basePath,
   conversation,
   messages,
   isPaused,
@@ -16,6 +17,8 @@ export function ChatView({
   templates,
 }: {
   slug: string;
+  /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
+  basePath: string;
   conversation: ConversationRow;
   messages: MessageRow[];
   isPaused: boolean;
@@ -26,7 +29,7 @@ export function ChatView({
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
       <div className="flex items-start gap-3 border-b border-border px-4 py-3.5">
         <Link
-          href={`/${slug}/conversas`}
+          href={`${basePath}/conversas`}
           scroll={false}
           className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
           aria-label="Voltar"

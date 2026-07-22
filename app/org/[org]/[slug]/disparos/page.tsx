@@ -1,5 +1,4 @@
-import { notFound } from "next/navigation";
-import { getAgent } from "@/lib/agents";
+import { assertAgentAccess } from "@/lib/access";
 import { getMetaConfig, getLeadSource } from "@/lib/meta-config";
 import {
   listScheduledDispatches,
@@ -18,14 +17,13 @@ export const dynamic = "force-dynamic";
 export default async function DisparosPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ org: string; slug: string }>;
 }) {
   const { slug } = await params;
-  const agent = getAgent(slug);
-  if (!agent) notFound();
+  const agent = await assertAgentAccess(slug);
 
-  const sendEnabled = !!getMetaConfig(slug);
-  const autoSupported = getLeadSource(slug).leadSource === "form";
+  const sendEnabled = !!getMetaConfig(agent);
+  const autoSupported = getLeadSource(agent).leadSource === "form";
 
   const [dispatches, autoRecovery, campaigns, followup] = await Promise.all([
     listScheduledDispatches(slug),

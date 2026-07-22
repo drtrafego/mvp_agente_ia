@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
 import { MessageSquareText, Info, Ban, User } from "lucide-react";
-import { getAgent } from "@/lib/agents";
+import { assertAgentAccess } from "@/lib/access";
 import { getMetaConfig } from "@/lib/meta-config";
 import { getApprovedTemplates } from "@/lib/actions";
 import type { ApprovedTemplate } from "@/lib/actions";
@@ -23,13 +22,12 @@ const CATEGORY_TONE: Record<
 export default async function TemplatesPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ org: string; slug: string }>;
 }) {
   const { slug } = await params;
-  const agent = getAgent(slug);
-  if (!agent) notFound();
+  const agent = await assertAgentAccess(slug);
 
-  const sendEnabled = !!getMetaConfig(slug);
+  const sendEnabled = !!getMetaConfig(agent);
   const templates = sendEnabled ? await getApprovedTemplates(slug) : [];
 
   return (

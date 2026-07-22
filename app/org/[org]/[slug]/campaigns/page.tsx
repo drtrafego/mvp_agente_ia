@@ -1,5 +1,4 @@
-import { notFound } from "next/navigation";
-import { getAgent } from "@/lib/agents";
+import { assertAgentAccess } from "@/lib/access";
 import { getMetaConfig } from "@/lib/meta-config";
 import { getApprovedTemplates, listCampaigns } from "@/lib/actions";
 import { PageHeader } from "@/components/page-header";
@@ -12,13 +11,12 @@ export const dynamic = "force-dynamic";
 export default async function CampaignsPage({
   params,
 }: {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ org: string; slug: string }>;
 }) {
   const { slug } = await params;
-  const agent = getAgent(slug);
-  if (!agent) notFound();
+  const agent = await assertAgentAccess(slug);
 
-  const sendEnabled = !!getMetaConfig(slug);
+  const sendEnabled = !!getMetaConfig(agent);
   const [campaigns, templates] = await Promise.all([
     listCampaigns(slug),
     sendEnabled ? getApprovedTemplates(slug) : Promise.resolve([]),

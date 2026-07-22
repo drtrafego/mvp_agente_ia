@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getAgent } from "@/lib/agents";
+import { canAccessAgent } from "@/lib/access";
 
 const BASE_URL =
   process.env.HERMES_PANEL_URL ?? "https://hermes.casaldotrafego.com/agente";
@@ -10,8 +10,14 @@ export async function GET(req: NextRequest) {
   const agente = req.nextUrl.searchParams.get("agente") ?? "";
   const file = req.nextUrl.searchParams.get("file") ?? "";
 
-  if (!getAgent(agente) || !FILE_RE.test(file)) {
+  if (!FILE_RE.test(file)) {
     return new Response("Requisição inválida.", { status: 400 });
+  }
+
+  // Autorização por agente, não só existência do slug: sem acesso, 404 seco,
+  // sem revelar se o agente existe. Vale também para mídia de outra empresa.
+  if (!(await canAccessAgent(agente))) {
+    return new Response("Não encontrado.", { status: 404 });
   }
 
   const token = process.env.PAINEL_API_TOKEN;

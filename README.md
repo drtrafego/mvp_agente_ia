@@ -51,13 +51,18 @@ build **não** depende do banco.
 ## Estrutura
 
 ```
-app/            rotas (portal, [slug], conversas, pipeline, login, api/auth)
+app/            rotas (portal, [slug], conversas, pipeline, login, handler, api/auth)
 components/     ui, sidebar, charts, kpi, chat-view, kanban helpers
-lib/            db (conexão postgres), agents (config + allowlist), queries, utils
-middleware.ts   gate de senha opcional
+lib/            db (conexão postgres), agents (catálogo + allowlist), access,
+                stack (SSO), identifier, crypto, queries, utils
+docs/sql/       migrações do Neon dos agentes (001, ainda não executada)
+middleware.ts   receptor do __st, sessão Stack e gate de senha da transição
 ```
 
 ## Segurança
 
-Os nomes de schema nunca vêm do request: são resolvidos por allowlist em
-`lib/agents.ts` (`safeSchema`). Filtros de valor usam parâmetros (`$1`).
+Os nomes de schema nunca vêm do request. O catálogo de agentes vive em
+`public.agents` (allowlist carregada em `lib/agents.ts`, com cache de 30s) e
+todo identificador passa pela regex estrita de `lib/identifier.ts`
+(`assertIdent`) antes de ser interpolado entre aspas duplas. O slug da URL só
+serve para resolver o agente. Filtros de valor usam parâmetros (`$1`).

@@ -1,8 +1,9 @@
 import "server-only";
 import { sql } from "./db";
-import { safeSchema, getAgent } from "./agents";
+import { getAgent } from "./agents";
+import { assertIdent } from "./identifier";
 import { getLeadSource } from "./meta-config";
-import { sendTemplateToLeads } from "./actions";
+import { sendTemplateToLeadsInternal } from "./outreach";
 
 // Máximo de envios por dispatch em cada execução do cron (evita timeout).
 const BATCH = 25;
@@ -88,6 +89,13 @@ async function nameMap(
 
 async function processSelected(d: SchedRow): Promise<number> {
   const agent = d.agent_slug;
+  // O cron nao tem sessao de usuario: resolve o agente pelo catalogo e usa o
+  // caminho interno de disparo, que nao exige acesso humano.
+  const record = await getAgent(agent);
+  if (!record) {
+    await markResult(d.id, "error", "Agente fora do catálogo.");
+    return 0;
+  }
   const templateName = d.template_name ?? "";
   if (!templateName) {
     await markResult(d.id, "error", "Sem template.");
@@ -103,14 +111,14 @@ async function processSelected(d: SchedRow): Promise<number> {
   }
 
   const batch = remaining.slice(0, BATCH);
-  const src = getLeadSource(agent);
+  const src = getLeadSource(record);
   const names =
     src.leadSource === "form" ? await nameMap(src.pageId, batch) : new Map();
   const targets = batch.map((p) => ({ phone: p, name: names.get(p) ?? "" }));
   const vars = toStrArray(d.template_vars);
 
-  const res = await sendTemplateToLeads(
-    agent,
+  const res = await sendTemplateToLeadsInternal(
+    record,
     targets,
     templateName,
     d.template_lang ?? "pt_BR",
@@ -131,12 +139,17 @@ async function processSelected(d: SchedRow): Promise<number> {
 
 async function processAuto(d: SchedRow): Promise<number> {
   const agent = d.agent_slug;
-  const src = getLeadSource(agent);
+  const record = await getAgent(agent);
+  const src = getLeadSource(record);
   if (src.leadSource !== "form") {
     await markResult(d.id, null, "Auto: fonte não é formulário.");
     return 0;
   }
-  const schema = safeSchema(agent);
+  if (!record) {
+    await markResult(d.id, null, "Auto: agente fora do catálogo.");
+    return 0;
+  }
+  const schema = assertIdent(record.schema);
   const pageId = src.pageId;
 
   const templateName = d.template_name ?? "";
@@ -172,8 +185,8 @@ async function processAuto(d: SchedRow): Promise<number> {
     .filter((l) => l.phone_norm)
     .map((l) => ({ phone: String(l.phone_norm), name: l.full_name ?? "" }));
 
-  const res = await sendTemplateToLeads(
-    agent,
+  const res = await sendTemplateToLeadsInternal(
+    record,
     targets,
     templateName,
     d.template_lang ?? "pt_BR",

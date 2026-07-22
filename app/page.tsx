@@ -1,177 +1,80 @@
 import Link from "next/link";
-import {
-  ArrowUpRight,
-  Bot,
-  Sparkles,
-  DollarSign,
-  MessageSquare,
-  MessagesSquare,
-  Activity,
-} from "lucide-react";
-import { AGENTS } from "@/lib/agents";
-import { getPortalStats } from "@/lib/queries";
-import { formatUSD, formatNumber, timeAgo } from "@/lib/utils";
+import { redirect } from "next/navigation";
+import { ArrowUpRight, Building2, ShieldAlert, Sparkles } from "lucide-react";
+import { getSessionEmail, getUserOrgs } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
-const ACCENT: Record<
-  string,
-  { ring: string; icon: string; glow: string; dot: string }
-> = {
-  primary: {
-    ring: "ring-primary/40 group-hover:ring-primary/70",
-    icon: "bg-primary/20 text-secondary",
-    glow: "from-primary/25",
-    dot: "bg-secondary",
-  },
-  secondary: {
-    ring: "ring-secondary/40 group-hover:ring-secondary/70",
-    icon: "bg-secondary/20 text-secondary",
-    glow: "from-secondary/25",
-    dot: "bg-secondary",
-  },
-  accent: {
-    ring: "ring-accent/40 group-hover:ring-accent/70",
-    icon: "bg-accent/20 text-accent",
-    glow: "from-accent/25",
-    dot: "bg-accent",
-  },
-};
-
 export default async function PortalPage() {
-  const stats = await getPortalStats();
+  const email = await getSessionEmail();
+  if (!email) redirect("/handler/sign-in");
 
-  const totals = Object.values(stats).reduce(
-    (acc, s) => {
-      acc.conversations += s.conversations;
-      acc.messages += s.messages;
-      acc.cost += s.cost;
-      return acc;
-    },
-    { conversations: 0, messages: 0, cost: 0 },
-  );
+  const orgs = await getUserOrgs(email);
+
+  // Uma empresa só: entra direto, sem tela intermediária.
+  if (orgs.length === 1) redirect(`/org/${orgs[0].slug}`);
 
   return (
-    <main className="mx-auto max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-      <header className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div className="animate-fade-up">
-          <div className="mb-3 flex items-center gap-2.5">
-            <div className="grid size-9 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
-              <Sparkles className="size-5" />
-            </div>
-            <span className="text-sm font-medium text-muted">Central de Agentes IA</span>
+    <main className="mx-auto max-w-4xl px-5 py-10 sm:px-8 sm:py-14">
+      <header className="mb-10 animate-fade-up">
+        <div className="mb-3 flex items-center gap-2.5">
+          <div className="grid size-9 place-items-center rounded-xl brand-gradient text-white shadow-[0_6px_18px_-6px_rgba(99,102,241,0.7)]">
+            <Sparkles className="size-5" />
           </div>
-          <h1 className="text-gradient inline-block text-3xl font-semibold tracking-tight sm:text-4xl">
-            Painel de atendimento
-          </h1>
-          <p className="mt-2 max-w-md text-sm text-muted">
-            Visão consolidada dos agentes de SAC. Selecione um agente para abrir o
-            dashboard completo.
-          </p>
+          <span className="text-sm font-medium text-muted">Central de Agentes IA</span>
         </div>
-
-        <div className="flex gap-6 text-right">
-          <PortalTotal
-            label="Conversas"
-            value={formatNumber(totals.conversations)}
-          />
-          <PortalTotal label="Mensagens" value={formatNumber(totals.messages)} />
-          <PortalTotal label="Custo total" value={formatUSD(totals.cost)} />
-        </div>
+        <h1 className="text-gradient inline-block text-3xl font-semibold tracking-tight sm:text-4xl">
+          Suas empresas
+        </h1>
+        <p className="mt-2 max-w-md text-sm text-muted">
+          Selecione a empresa para ver os agentes de atendimento dela.
+        </p>
       </header>
 
-      <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {AGENTS.map((agent, i) => {
-          const s = stats[agent.slug];
-          const accent = ACCENT[agent.accent];
-          const idle = s.conversations === 0;
-          return (
-            <Link
-              key={agent.slug}
-              href={`/${agent.slug}`}
-              style={{ animationDelay: `${i * 60}ms` }}
-              className={`group relative animate-fade-up overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-soft ring-1 ring-inset ${accent.ring} transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary`}
+      {orgs.length === 0 ? (
+        <div className="animate-fade-up grid place-items-center rounded-2xl border border-dashed border-border glass p-14 text-center shadow-soft">
+          <div>
+            <span className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-accent-2/15 text-[#c4b5fd]">
+              <ShieldAlert className="size-6" />
+            </span>
+            <p className="font-medium">Sem acesso a nenhuma empresa</p>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+              Sua conta está autenticada, mas ainda não está vinculada a nenhuma
+              empresa. Fale com o suporte pelo portal do cliente.
+            </p>
+            <a
+              href="https://cliente.casaldotrafego.com/hub"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted transition-colors hover:text-fg"
             >
-              <div
-                className={`pointer-events-none absolute -right-16 -top-16 size-40 rounded-full bg-gradient-to-br ${accent.glow} to-transparent opacity-70 blur-2xl`}
-              />
-              <div className="relative flex items-start justify-between">
+              Abrir o portal <ArrowUpRight className="size-3.5" />
+            </a>
+          </div>
+        </div>
+      ) : (
+        <section className="grid gap-4 sm:grid-cols-2">
+          {orgs.map((org, i) => (
+            <Link
+              key={org.id}
+              href={`/org/${org.slug}`}
+              style={{ animationDelay: `${i * 60}ms` }}
+              className="group relative animate-fade-up overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-soft ring-1 ring-inset ring-secondary/25 transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary"
+            >
+              <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div
-                    className={`grid size-11 place-items-center rounded-xl ${accent.icon}`}
-                  >
-                    <Bot className="size-6" />
+                  <div className="grid size-11 place-items-center rounded-xl bg-secondary/20 text-secondary">
+                    <Building2 className="size-6" />
                   </div>
-                  <div>
-                    <h2 className="font-semibold leading-tight">{agent.name}</h2>
-                    <p className="text-xs text-muted">Persona {agent.persona}</p>
+                  <div className="min-w-0">
+                    <h2 className="truncate font-semibold leading-tight">{org.name}</h2>
+                    <p className="truncate text-xs text-muted">{org.slug}</p>
                   </div>
                 </div>
                 <ArrowUpRight className="size-5 text-muted-2 transition-all duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-fg" />
               </div>
-
-              <p className="relative mt-4 text-sm text-muted">{agent.description}</p>
-
-              <div className="relative mt-5 grid grid-cols-3 gap-3 border-t border-border pt-4">
-                <Metric
-                  icon={<MessagesSquare className="size-3.5" />}
-                  label="Conversas"
-                  value={formatNumber(s.conversations)}
-                />
-                <Metric
-                  icon={<MessageSquare className="size-3.5" />}
-                  label="Mensagens"
-                  value={formatNumber(s.messages)}
-                />
-                <Metric
-                  icon={<DollarSign className="size-3.5" />}
-                  label="Custo"
-                  value={formatUSD(s.cost)}
-                />
-              </div>
-
-              <div className="relative mt-4 flex items-center gap-2 text-xs text-muted">
-                <span
-                  className={`inline-block size-1.5 rounded-full ${
-                    idle ? "bg-muted-2" : accent.dot
-                  }`}
-                />
-                <Activity className="size-3.5" />
-                {idle ? "Sem atividade ainda" : timeAgo(s.lastActivity)}
-              </div>
             </Link>
-          );
-        })}
-      </section>
+          ))}
+        </section>
+      )}
     </main>
-  );
-}
-
-function PortalTotal({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="animate-fade-up">
-      <div className="tnum text-2xl font-semibold tracking-tight">{value}</div>
-      <div className="text-xs text-muted">{label}</div>
-    </div>
-  );
-}
-
-function Metric({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-2">
-        {icon}
-        {label}
-      </div>
-      <div className="tnum mt-1 text-base font-semibold">{value}</div>
-    </div>
   );
 }

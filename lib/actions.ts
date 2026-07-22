@@ -2,8 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
-import { getAgent } from "./agents";
+import type { Agent } from "./agents";
+import { assertAgentAccess } from "./access";
 import { getMetaConfig, getMetaToken } from "./meta-config";
+import { sendTemplateToLeadsInternal } from "./outreach";
+import type {
+  OutreachSummary,
+  OutreachTarget,
+} from "./outreach";
 import {
   sendWhatsappText,
   sendWhatsappTemplate,
@@ -22,6 +28,15 @@ export type ActionResult = {
 };
 
 export type { ApprovedTemplate };
+export type { OutreachTarget, OutreachResult, OutreachSummary } from "./outreach";
+
+/**
+ * Prefixo de rota do agente para revalidatePath. O slug da empresa sai do
+ * agente resolvido pelo assert, nunca de argumento vindo do browser.
+ */
+function agentPath(agent: Agent, suffix = ""): string {
+  return `/org/${agent.orgSlug}/${agent.slug}${suffix}`;
+}
 
 async function callPanel(
   path: string,
@@ -72,7 +87,7 @@ async function callPanel(
 
 /** Lista de chat_ids pausados de um agente. Nunca lança: em erro retorna []. */
 export async function getPausedChatIds(slug: string): Promise<string[]> {
-  if (!getAgent(slug)) return [];
+  await assertAgentAccess(slug);
   const res = await callPanel(
     `/api/pausados?agente=${encodeURIComponent(slug)}`,
     { method: "GET" },
@@ -88,7 +103,7 @@ export async function togglePauseAction(
   chatId: string | null,
   pause: boolean,
 ): Promise<ActionResult> {
-  if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
+  const agent = await assertAgentAccess(slug);
   if (!chatId) return { ok: false, error: "Conversa sem contato vinculado." };
 
   const res = await callPanel(pause ? "/api/pausar" : "/api/retomar", {
@@ -97,7 +112,7 @@ export async function togglePauseAction(
   });
   if (!res.ok) return { ok: false, error: res.error };
 
-  revalidatePath(`/${slug}/conversas`);
+  revalidatePath(agentPath(agent, "/conversas"));
   return { ok: true };
 }
 
@@ -107,20 +122,20 @@ export async function sendReplyAction(
   chatId: string | null,
   texto: string,
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     if (!chatId) return { ok: false, error: "Conversa sem contato vinculado." };
     const msg = texto.trim();
     if (!msg) return { ok: false, error: "Digite uma mensagem." };
 
-    const cfg = getMetaConfig(slug);
+    const cfg = getMetaConfig(agent);
     if (!cfg) {
       return {
         ok: false,
         error: "Este agente não tem número de WhatsApp oficial configurado.",
       };
     }
-    const token = getMetaToken(slug);
+    const token = getMetaToken(agent);
     if (!token) {
       return {
         ok: false,
@@ -150,20 +165,20 @@ export async function sendTemplateAction(
   lang: string,
   params: string[] = [],
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     if (!chatId) return { ok: false, error: "Conversa sem contato vinculado." };
     if (!templateName)
       return { ok: false, error: "Selecione um template." };
 
-    const cfg = getMetaConfig(slug);
+    const cfg = getMetaConfig(agent);
     if (!cfg) {
       return {
         ok: false,
         error: "Este agente não tem número de WhatsApp oficial configurado.",
       };
     }
-    const token = getMetaToken(slug);
+    const token = getMetaToken(agent);
     if (!token) {
       return {
         ok: false,
@@ -196,10 +211,11 @@ export async function sendTemplateAction(
 export async function getApprovedTemplates(
   slug: string,
 ): Promise<ApprovedTemplate[]> {
+  const agent = await assertAgentAccess(slug);
   try {
-    const cfg = getMetaConfig(slug);
+    const cfg = getMetaConfig(agent);
     if (!cfg) return [];
-    return await listApprovedTemplates(cfg.wabaId, getMetaToken(slug));
+    return await listApprovedTemplates(cfg.wabaId, getMetaToken(agent));
   } catch {
     return [];
   }
@@ -207,45 +223,9 @@ export async function getApprovedTemplates(
 
 // ---- Disparo de template em massa (outreach) ------------------------
 
-export type OutreachTarget = { phone: string; name: string };
-export type OutreachResult = {
-  phone: string;
-  name: string;
-  ok: boolean;
-  error?: string;
-};
-export type OutreachSummary = {
-  ok: boolean;
-  enviados: number;
-  falhas: number;
-  resultados: OutreachResult[];
-  error?: string;
-};
-
-async function ensureOutreachTable(): Promise<void> {
-  await sql.unsafe(
-    `create table if not exists public.outreach_sent (
-       id text primary key,
-       agent_slug text,
-       phone_norm text,
-       lead_name text,
-       template_name text,
-       sent_at timestamptz default now(),
-       status text,
-       message_id text,
-       error text
-     )`,
-  );
-  await sql.unsafe(
-    `create index if not exists outreach_sent_agent_phone_idx
-       on public.outreach_sent (agent_slug, phone_norm)`,
-  );
-}
-
 /**
- * Dispara um template aprovado para uma lista de leads (1º toque em quem
- * preencheu o form mas não conversou). Envio direto pela Meta, com delay entre
- * mensagens; grava cada resultado em public.outreach_sent. Nunca lança 500.
+ * Server action pública do disparo: valida o ACESSO ao agente e delega para o
+ * caminho interno (lib/outreach.ts), que é o mesmo usado pelo cron.
  */
 export async function sendTemplateToLeads(
   slug: string,
@@ -255,110 +235,15 @@ export async function sendTemplateToLeads(
   sharedParams: string[] = [],
   varCount = 0,
 ): Promise<OutreachSummary> {
-  const fail = (error: string): OutreachSummary => ({
-    ok: false,
-    enviados: 0,
-    falhas: 0,
-    resultados: [],
-    error,
-  });
-  try {
-    if (!getAgent(slug)) return fail("Agente desconhecido.");
-    const cfg = getMetaConfig(slug);
-    if (!cfg)
-      return fail("Este agente não tem número de WhatsApp oficial configurado.");
-    const token = getMetaToken(slug);
-    if (!token)
-      return fail("Este agente não tem número de WhatsApp oficial configurado.");
-    if (!templateName) return fail("Selecione um template.");
-    if (!Array.isArray(targets) || targets.length === 0)
-      return fail("Nenhum lead selecionado.");
-
-    // {{1}} = nome do lead (por lead); {{2}}..{{n}} = compartilhados.
-    const shared = sharedParams.map((p) => p.trim());
-    if (varCount > 1 && shared.length < varCount - 1) {
-      return fail(
-        `Preencha as ${varCount - 1} variáveis compartilhadas do template.`,
-      );
-    }
-    const sharedForTemplate = varCount > 1 ? shared.slice(0, varCount - 1) : [];
-
-    try {
-      await ensureOutreachTable();
-    } catch {
-      // se não der pra criar a tabela, segue o envio mesmo sem rastreio
-    }
-
-    const resultados: OutreachResult[] = [];
-    let enviados = 0;
-    let falhas = 0;
-
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
-      const name = t?.name ?? "";
-      const phone = (t?.phone ?? "").replace(/\D/g, "");
-      if (!phone) {
-        falhas++;
-        resultados.push({ phone: t?.phone ?? "", name, ok: false, error: "Telefone inválido." });
-        continue;
-      }
-
-      // Monta bodyParams por lead: [nome, ...compartilhados]. Sem variáveis → [].
-      const bodyParams =
-        varCount === 0
-          ? []
-          : [name.trim() || "tudo bem", ...sharedForTemplate];
-
-      const r = await sendWhatsappTemplate(
-        phone,
-        templateName,
-        lang || "pt_BR",
-        bodyParams,
-        cfg.phoneNumberId,
-        token,
-      );
-
-      const id = `${slug}:${phone}:${Date.now()}:${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      try {
-        await sql.unsafe(
-          `insert into public.outreach_sent
-             (id, agent_slug, phone_norm, lead_name, template_name, status, message_id, error)
-           values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [
-            id,
-            slug,
-            phone,
-            name || null,
-            templateName,
-            r.ok ? "sent" : "failed",
-            r.messageId || null,
-            r.ok ? null : r.error ?? null,
-          ],
-        );
-      } catch {
-        // rastreio é best-effort; não interrompe o disparo
-      }
-
-      if (r.ok) {
-        enviados++;
-        resultados.push({ phone, name, ok: true });
-      } else {
-        falhas++;
-        resultados.push({ phone, name, ok: false, error: r.error });
-      }
-
-      if (i < targets.length - 1) {
-        await new Promise((res) => setTimeout(res, 1000));
-      }
-    }
-
-    revalidatePath(`/${slug}/leads`);
-    return { ok: true, enviados, falhas, resultados };
-  } catch {
-    return fail("Erro inesperado no disparo.");
-  }
+  const agent = await assertAgentAccess(slug);
+  return sendTemplateToLeadsInternal(
+    agent,
+    targets,
+    templateName,
+    lang,
+    sharedParams,
+    varCount,
+  );
 }
 
 // ---- Campanhas salvas (reuso de template + variáveis) ---------------
@@ -416,8 +301,8 @@ export async function createCampaign(
     body: string;
   },
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     const name = data.name?.trim();
     if (!name) return { ok: false, error: "Dê um nome à campanha." };
     if (!data.templateName)
@@ -443,7 +328,7 @@ export async function createCampaign(
         data.body ?? "",
       ],
     );
-    revalidatePath(`/${slug}/campaigns`);
+    revalidatePath(agentPath(agent, "/campaigns"));
     return { ok: true, id };
   } catch {
     return { ok: false, error: "Erro inesperado ao salvar a campanha." };
@@ -461,8 +346,8 @@ export async function updateCampaign(
     body: string;
   },
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     if (!id) return { ok: false, error: "Campanha inválida." };
     const name = data.name?.trim();
     if (!name) return { ok: false, error: "Dê um nome à campanha." };
@@ -490,7 +375,7 @@ export async function updateCampaign(
         data.body ?? "",
       ],
     );
-    revalidatePath(`/${slug}/campaigns`);
+    revalidatePath(agentPath(agent, "/campaigns"));
     return { ok: true };
   } catch {
     return { ok: false, error: "Erro inesperado ao editar a campanha." };
@@ -498,8 +383,8 @@ export async function updateCampaign(
 }
 
 export async function listCampaigns(slug: string): Promise<Campaign[]> {
+  await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return [];
     const rows = await sql.unsafe<
       {
         id: string;
@@ -536,14 +421,14 @@ export async function deleteCampaign(
   slug: string,
   id: string,
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     if (!id) return { ok: false, error: "Campanha inválida." };
     await sql.unsafe(
       `update public.campaigns set active = false where id = $1 and agent_slug = $2`,
       [id, slug],
     );
-    revalidatePath(`/${slug}/campaigns`);
+    revalidatePath(agentPath(agent, "/campaigns"));
     return { ok: true };
   } catch {
     return { ok: false, error: "Erro inesperado ao excluir a campanha." };
@@ -563,8 +448,8 @@ export async function dispatchCampaign(
     resultados: [],
     error,
   });
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return fail("Agente desconhecido.");
     if (!campaignId) return fail("Campanha inválida.");
 
     const [row] = await sql.unsafe<
@@ -586,8 +471,8 @@ export async function dispatchCampaign(
     // varCount = 1 (nome) + variáveis compartilhadas salvas.
     const varCount = 1 + vars.length;
 
-    return await sendTemplateToLeads(
-      slug,
+    return await sendTemplateToLeadsInternal(
+      agent,
       targets,
       row.template_name,
       row.template_lang ?? "pt_BR",
@@ -659,9 +544,9 @@ export async function createScheduledDispatch(
     scheduledAt: string | null;
   },
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
-    if (!getMetaConfig(slug))
+    if (!getMetaConfig(agent))
       return { ok: false, error: "Agente sem número de WhatsApp oficial." };
     if (!input.templateName)
       return { ok: false, error: "Selecione um template ou campanha." };
@@ -686,7 +571,7 @@ export async function createScheduledDispatch(
               ${input.lang || "pt_BR"}, ${sql.json(vars)}, 'selected',
               ${sql.json(phones)}, ${scheduledAt}, 'pending', true, now())
     `;
-    revalidatePath(`/${slug}/disparos`);
+    revalidatePath(agentPath(agent, "/disparos"));
     return { ok: true };
   } catch {
     return { ok: false, error: "Erro inesperado ao programar o disparo." };
@@ -696,8 +581,8 @@ export async function createScheduledDispatch(
 export async function listScheduledDispatches(
   slug: string,
 ): Promise<ScheduledDispatch[]> {
+  await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return [];
     const rows = await sql.unsafe<
       {
         id: string;
@@ -747,15 +632,15 @@ export async function cancelScheduledDispatch(
   slug: string,
   id: string,
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     if (!id) return { ok: false, error: "Disparo inválido." };
     await sql.unsafe(
       `update public.scheduled_dispatches set status = 'canceled'
        where id = $1 and agent_slug = $2 and status = 'pending' and kind = 'selected'`,
       [id, slug],
     );
-    revalidatePath(`/${slug}/disparos`);
+    revalidatePath(agentPath(agent, "/disparos"));
     return { ok: true };
   } catch {
     return { ok: false, error: "Erro ao cancelar o disparo." };
@@ -763,8 +648,8 @@ export async function cancelScheduledDispatch(
 }
 
 export async function getAutoRecovery(slug: string): Promise<AutoRecovery> {
+  await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return null;
     const [row] = await sql.unsafe<
       { enabled: boolean | null; campaign_id: string | null }[]
     >(
@@ -784,8 +669,8 @@ export async function setAutoRecovery(
   slug: string,
   input: { enabled: boolean; campaignId: string },
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
     if (input.enabled && !input.campaignId)
       return {
         ok: false,
@@ -831,7 +716,7 @@ export async function setAutoRecovery(
         template_vars = excluded.template_vars,
         enabled = excluded.enabled
     `;
-    revalidatePath(`/${slug}/disparos`);
+    revalidatePath(agentPath(agent, "/disparos"));
     return { ok: true };
   } catch {
     return { ok: false, error: "Erro ao atualizar a auto-recuperação." };
@@ -900,8 +785,8 @@ export async function getFollowupConfig(
     enabled: false,
     steps: DEFAULT_FOLLOWUP_STEPS,
   };
+  await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return fallback;
     await ensureFollowupTables();
     const [row] = await sql.unsafe<
       { enabled: boolean | null; steps: unknown }[]
@@ -932,9 +817,9 @@ export async function saveFollowupConfig(
   slug: string,
   input: { enabled: boolean; steps: FollowupStep[] },
 ): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
   try {
-    if (!getAgent(slug)) return { ok: false, error: "Agente desconhecido." };
-    if (!getMetaConfig(slug))
+    if (!getMetaConfig(agent))
       return { ok: false, error: "Agente sem número de WhatsApp oficial." };
     const steps = sanitizeSteps(input.steps);
     if (input.enabled && steps.length === 0)
@@ -952,7 +837,7 @@ export async function saveFollowupConfig(
         steps = excluded.steps,
         updated_at = now()
     `;
-    revalidatePath(`/${slug}/disparos`);
+    revalidatePath(agentPath(agent, "/disparos"));
     return { ok: true };
   } catch {
     return { ok: false, error: "Erro ao salvar o follow-up." };

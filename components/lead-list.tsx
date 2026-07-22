@@ -105,12 +105,15 @@ function LeadStatusBadge({ lead }: { lead: FormLead }) {
 
 export function LeadList({
   slug,
+  basePath,
   leads,
   templates,
   campaigns,
   sendEnabled,
 }: {
   slug: string;
+  /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
+  basePath: string;
   leads: FormLead[];
   templates: ApprovedTemplate[];
   campaigns: Campaign[];
@@ -339,7 +342,7 @@ export function LeadList({
       </div>
 
       {detail ? (
-        <LeadModal slug={slug} lead={detail} onClose={() => setDetail(null)} />
+        <LeadModal basePath={basePath} lead={detail} onClose={() => setDetail(null)} />
       ) : null}
 
       {campaignOpen ? (
@@ -1099,11 +1102,11 @@ function ResultView({ result }: { result: OutreachSummary }) {
 }
 
 function LeadModal({
-  slug,
+  basePath,
   lead,
   onClose,
 }: {
-  slug: string;
+  basePath: string;
   lead: FormLead;
   onClose: () => void;
 }) {
@@ -1258,7 +1261,7 @@ function LeadModal({
         <div className="border-t border-border p-4">
           {lead.conversou && lead.session_id ? (
             <Link
-              href={`/${slug}/conversas?c=${encodeURIComponent(lead.session_id)}`}
+              href={`${basePath}/conversas?c=${encodeURIComponent(lead.session_id)}`}
               className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110"
             >
               <MessageCircle className="size-4" />

@@ -22,40 +22,40 @@ import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
-function buildNav(slug: string): NavItem[] {
+function buildNav(basePath: string): NavItem[] {
   return [
     {
-      href: `/${slug}`,
+      href: basePath,
       label: "Visão geral",
       icon: <LayoutDashboard className="size-[18px]" />,
     },
     {
-      href: `/${slug}/conversas`,
+      href: `${basePath}/conversas`,
       label: "Conversas",
       icon: <MessagesSquare className="size-[18px]" />,
     },
     {
-      href: `/${slug}/leads`,
+      href: `${basePath}/leads`,
       label: "Leads",
       icon: <Users className="size-[18px]" />,
     },
     {
-      href: `/${slug}/templates`,
+      href: `${basePath}/templates`,
       label: "Mensagens",
       icon: <MessageSquareText className="size-[18px]" />,
     },
     {
-      href: `/${slug}/campaigns`,
+      href: `${basePath}/campaigns`,
       label: "Campanhas",
       icon: <Megaphone className="size-[18px]" />,
     },
     {
-      href: `/${slug}/disparos`,
+      href: `${basePath}/disparos`,
       label: "Disparos",
       icon: <Send className="size-[18px]" />,
     },
     {
-      href: `/${slug}/pipeline`,
+      href: `${basePath}/pipeline`,
       label: "Pipeline",
       icon: <KanbanSquare className="size-[18px]" />,
     },
@@ -86,17 +86,17 @@ function BrandMark({ size = "md" }: { size?: "sm" | "md" }) {
 }
 
 function NavList({
-  slug,
+  basePath,
   collapsed,
   onNavigate,
 }: {
-  slug: string;
+  basePath: string;
   collapsed: boolean;
   onNavigate?: () => void;
 }) {
-  const nav = buildNav(slug);
+  const nav = buildNav(basePath);
   const isActive = useIsActive();
-  const base = `/${slug}`;
+  const base = basePath;
   return (
     <nav className="flex flex-col gap-1">
       {nav.map((item) => {
@@ -134,12 +134,16 @@ function NavList({
 }
 
 export function AppShell({
-  slug,
+  basePath,
+  orgPath,
   name,
   persona,
   children,
 }: {
-  slug: string;
+  /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
+  basePath: string;
+  /** Rota da empresa: /org/<empresa>. Volta para a lista de agentes. */
+  orgPath: string;
   name: string;
   persona: string;
   children: React.ReactNode;
@@ -174,7 +178,7 @@ export function AppShell({
       {/* ---- Desktop sidebar ---- */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[var(--sbw)] flex-col border-r border-border glass px-3 py-4 transition-[width] duration-300 lg:flex">
         <Link
-          href="/"
+          href={orgPath}
           title="Todos os agentes"
           className={cn(
             "mb-4 flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-2 transition-colors hover:text-fg",
@@ -200,7 +204,7 @@ export function AppShell({
           ) : null}
         </div>
 
-        <NavList slug={slug} collapsed={collapsed} />
+        <NavList basePath={basePath} collapsed={collapsed} />
 
         <div className="mt-auto flex flex-col gap-3">
           <button
@@ -271,12 +275,12 @@ export function AppShell({
               </button>
             </div>
             <NavList
-              slug={slug}
+              basePath={basePath}
               collapsed={false}
               onNavigate={() => setMobileOpen(false)}
             />
             <Link
-              href="/"
+              href={orgPath}
               onClick={() => setMobileOpen(false)}
               className="mt-auto flex items-center gap-1.5 px-2 py-1 text-xs text-muted-2 hover:text-fg"
             >
