@@ -14,6 +14,7 @@ import {
   KanbanSquare,
   Sparkles,
   ChevronLeft,
+  Settings,
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
@@ -24,8 +25,8 @@ import { PortalLink } from "@/components/portal-link";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
-function buildNav(basePath: string): NavItem[] {
-  return [
+function buildNav(basePath: string, showSettings: boolean): NavItem[] {
+  const items: NavItem[] = [
     {
       href: basePath,
       label: "Visão geral",
@@ -67,6 +68,18 @@ function buildNav(basePath: string): NavItem[] {
       icon: <KanbanSquare className="size-[18px]" />,
     },
   ];
+
+  // Configuração do agente é operação de dono do sistema: número da Meta,
+  // token e fonte de leads não são do cliente. Fora do menu para quem não edita.
+  if (showSettings) {
+    items.push({
+      href: `${basePath}/configuracoes`,
+      label: "Configurações",
+      icon: <Settings className="size-[18px]" />,
+    });
+  }
+
+  return items;
 }
 
 function useIsActive() {
@@ -95,13 +108,15 @@ function BrandMark({ size = "md" }: { size?: "sm" | "md" }) {
 function NavList({
   basePath,
   collapsed,
+  showSettings,
   onNavigate,
 }: {
   basePath: string;
   collapsed: boolean;
+  showSettings: boolean;
   onNavigate?: () => void;
 }) {
-  const nav = buildNav(basePath);
+  const nav = buildNav(basePath, showSettings);
   const isActive = useIsActive();
   const base = basePath;
   return (
@@ -145,6 +160,7 @@ export function AppShell({
   orgPath,
   name,
   persona,
+  showSettings = false,
   children,
 }: {
   /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
@@ -153,6 +169,8 @@ export function AppShell({
   orgPath: string;
   name: string;
   persona: string;
+  /** Só quem pode editar a configuração vê o item no menu. */
+  showSettings?: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -211,7 +229,7 @@ export function AppShell({
           ) : null}
         </div>
 
-        <NavList basePath={basePath} collapsed={collapsed} />
+        <NavList basePath={basePath} collapsed={collapsed} showSettings={showSettings} />
 
         <div className="mt-auto flex flex-col gap-1.5">
           <PortalLink collapsed={collapsed} />
@@ -285,6 +303,7 @@ export function AppShell({
             <NavList
               basePath={basePath}
               collapsed={false}
+              showSettings={showSettings}
               onNavigate={() => setMobileOpen(false)}
             />
             <div className="mt-auto flex flex-col gap-1">

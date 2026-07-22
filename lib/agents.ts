@@ -124,6 +124,14 @@ type CatalogState = { at: number; agents: Agent[]; bySlug: Map<string, Agent> };
 let catalogCache: CatalogState | null = null;
 let inflight: Promise<CatalogState> | null = null;
 
+/**
+ * Descarta o catálogo em memória. Chamado depois de gravar a configuração de
+ * um agente, senão a tela continuaria mostrando o valor antigo por até 30s.
+ */
+export function invalidateCatalog(): void {
+  catalogCache = null;
+}
+
 function toAccent(v: string | null): AgentAccent {
   return v === "secondary" || v === "accent" ? v : "primary";
 }

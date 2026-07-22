@@ -1,4 +1,5 @@
-import { assertOrgAgentAccess } from "@/lib/access";
+import { assertOrgAgentAccess, getSessionEmail } from "@/lib/access";
+import { isSuperAdmin } from "@/lib/admin";
 import { AppShell } from "@/components/sidebar";
 
 export default async function AgentLayout({
@@ -14,6 +15,7 @@ export default async function AgentLayout({
   // sessão Stack, empresa da URL, membership ou superadmin, agente ativo e
   // agente pertencente àquela empresa. Qualquer falha vira 404, nunca 403.
   const { agent } = await assertOrgAgentAccess(org, slug);
+  const email = await getSessionEmail();
 
   return (
     <AppShell
@@ -21,6 +23,7 @@ export default async function AgentLayout({
       orgPath={`/org/${org}`}
       name={agent.name}
       persona={agent.persona}
+      showSettings={isSuperAdmin(email)}
     >
       {children}
     </AppShell>
