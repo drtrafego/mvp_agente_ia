@@ -11,18 +11,15 @@ const CSP_FRAME_ANCESTORS =
 /**
  * Rotas que passam sem gate de sessão.
  *
- * /handler, /login e /api/auth são as telas de login.
+ * /handler são as telas de login do Stack Auth.
  * /api/dispatch é o cron de disparos: ele roda sem usuário, valida o próprio
  * segredo (DISPATCH_CRON_SECRET) dentro da rota e responde 401 sem ele. Sem
- * esta exceção, o gate de senha redirecionaria o cron para /login e os
+ * esta exceção, o gate redirecionaria o cron para a tela de login e os
  * disparos parariam de sair.
  */
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname.startsWith("/handler") ||
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/dispatch")
+    pathname.startsWith("/handler") || pathname.startsWith("/api/dispatch")
   );
 }
 
@@ -125,33 +122,15 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 4. Com o Stack Auth configurado, as telas exigem sessão SEMPRE, sem
-  //    fallback de senha: o isolamento por empresa depende do email, e senha
-  //    compartilhada não tem email. Vale para /org/* e para a raiz, que lista
-  //    as empresas do usuário.
+  // 4. Sem sessão válida, vai para o login. O gate de senha compartilhada
+  //    (DASHBOARD_PASSWORD) foi removido: o isolamento por empresa depende do
+  //    email do usuário, e senha compartilhada não tem email.
   //
-  //    Sem as env vars do Stack, NÃO redireciona: /handler/sign-in não teria
-  //    como autenticar ninguém e o app inteiro ficaria inacessível, inclusive
-  //    para a equipe interna. Nesse caso cai no gate de senha do passo 5, que
-  //    é o que o .env.example promete.
-  const isAppScreen =
-    pathname === "/" || pathname === "/org" || pathname.startsWith("/org/");
-  if (stackServerApp && isAppScreen) {
-    return NextResponse.redirect(new URL("/handler/sign-in", req.url));
-  }
-
-  // 5. Fallback da transição: gate de senha atual. Ninguém perde acesso
-  //    enquanto o SSO não estiver validado em produção (some na Fase 7).
-  const password = process.env.DASHBOARD_PASSWORD;
-  if (!password) return allow();
-
-  const token = req.cookies.get("dash_auth")?.value;
-  if (token === password) return allow();
-
-  const url = req.nextUrl.clone();
-  url.pathname = "/login";
-  url.searchParams.set("from", pathname);
-  return NextResponse.redirect(url);
+  //    Se o Stack Auth não estiver configurado no ambiente, isto tranca o app
+  //    inteiro, e é o comportamento correto: sem identidade não há como
+  //    decidir quem vê qual empresa. As três env vars do Stack passam a ser
+  //    obrigatórias, não opcionais.
+  return NextResponse.redirect(new URL("/handler/sign-in", req.url));
 }
 
 export const config = {

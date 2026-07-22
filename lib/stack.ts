@@ -6,9 +6,9 @@ import { StackServerApp } from "@stackframe/stack";
  * STACK_SECRET_SERVER_KEY precisam ser idênticas às do portal, senão a
  * sessão que chega do iframe não é reconhecida.
  *
- * Degrada sem quebrar: sem as envs (ou com erro de construção), o export vale
- * null e quem chama cai no fluxo antigo de senha (DASHBOARD_PASSWORD). O app
- * continua no ar, só sem SSO.
+ * Sem as envs (ou com erro de construção) o export vale null. Nesse caso não
+ * há login possível, e o middleware tranca o app em vez de abrir: sem
+ * identidade não dá para decidir quem enxerga qual empresa.
  */
 const projectId = process.env.NEXT_PUBLIC_STACK_PROJECT_ID?.trim();
 const secretServerKey = process.env.STACK_SECRET_SERVER_KEY?.trim();

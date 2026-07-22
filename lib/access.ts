@@ -41,22 +41,6 @@ export const getSessionEmail = cache(async (): Promise<string | null> => {
   }
 });
 
-/**
- * Empresas derivadas do catálogo de agentes. Usado SOMENTE como fallback
- * quando a consulta a public.organizations falha, que é o caso enquanto o SQL
- * da Fase 1 não tiver sido executado. Não concede acesso por si: quem não for
- * superadmin ainda precisa passar pela checagem de membership, que falha nesse
- * cenário. Remover junto com o FALLBACK_AGENTS de lib/agents.ts.
- */
-async function orgsFromCatalog(): Promise<Organization[]> {
-  const agents = await listAgents();
-  const bySlug = new Map<string, Organization>();
-  for (const a of agents) {
-    bySlug.set(a.orgSlug, { id: a.organizationId, name: a.orgName, slug: a.orgSlug });
-  }
-  return [...bySlug.values()];
-}
-
 /** Empresas do usuário. Superadmin recebe todas. */
 export async function getUserOrgs(email?: string | null): Promise<Organization[]> {
   const sessionEmail = email ?? (await getSessionEmail());
@@ -77,9 +61,11 @@ export async function getUserOrgs(email?: string | null): Promise<Organization[]
       [sessionEmail],
     );
   } catch (err) {
+    // Falha fechada: sem conseguir ler as empresas, ninguem recebe empresa
+    // nenhuma, nem superadmin. Adivinhar aqui abriria a porta para mostrar
+    // empresa errada justamente quando o banco esta instavel.
     console.error("Falha ao ler public.organizations:", err);
-    // Fallback de transição, só para superadmin (ver orgsFromCatalog).
-    return isSuperAdmin(sessionEmail) ? orgsFromCatalog() : [];
+    return [];
   }
 }
 
@@ -92,9 +78,10 @@ export async function getOrgBySlug(slug: string): Promise<Organization | null> {
     );
     return row ?? null;
   } catch (err) {
+    // Falha fechada, mesmo motivo de getUserOrgs: empresa não resolvida vira
+    // 404 lá em cima, e é o resultado correto quando não dá para confirmar.
     console.error("Falha ao ler public.organizations:", err);
-    const orgs = await orgsFromCatalog();
-    return orgs.find((o) => o.slug === slug) ?? null;
+    return null;
   }
 }
 

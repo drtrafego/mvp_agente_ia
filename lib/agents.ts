@@ -48,75 +48,6 @@ type AgentRow = {
   display_order: number | null;
 };
 
-/**
- * Catálogo de transição, usado APENAS enquanto public.agents não existir no
- * Neon (o SQL de docs/sql/001_agentes_multi_empresa.sql ainda não foi
- * executado) ou quando a leitura do catálogo falhar e não houver cache quente.
- *
- * São exatamente os 3 agentes que estavam hardcode aqui antes, com os mesmos
- * valores do seed. Existe para que os 3 agentes de produção não saiam do ar
- * durante a migração. Remover na Fase 7, depois do seed validado.
- */
-const FALLBACK_AGENTS: Agent[] = [
-  {
-    id: "fallback-agente24horas",
-    organizationId: "fallback-agente24horas",
-    orgSlug: "agente24horas",
-    orgName: "Agente24horas",
-    slug: "agente24horas",
-    schema: "agente24horas",
-    name: "Agente24Horas",
-    persona: "Nina",
-    description: "Atendimento 24h no WhatsApp",
-    accent: "secondary",
-    metaPhoneNumberId: "115216611574100",
-    metaWabaId: "106071169159774",
-    metaTokenEnv: "META_ACCESS_TOKEN",
-    metaTokenCipher: null,
-    leadSource: "form",
-    leadSourcePageId: "109902140539351",
-    displayOrder: 0,
-  },
-  {
-    id: "fallback-casaldotrafego",
-    organizationId: "fallback-casal-do-trafego-admin",
-    orgSlug: "casal-do-trafego-admin",
-    orgName: "Casal do Tráfego (Admin)",
-    slug: "casaldotrafego",
-    schema: "casaldotrafego",
-    name: "Casal do Tráfego",
-    persona: "Amanda",
-    description: "SAC e qualificação de leads de tráfego pago",
-    accent: "accent",
-    metaPhoneNumberId: "414594695067374",
-    metaWabaId: "404364559427067",
-    metaTokenEnv: "META_ACCESS_TOKEN",
-    metaTokenCipher: null,
-    leadSource: "outreach",
-    leadSourcePageId: null,
-    displayOrder: 0,
-  },
-  {
-    id: "fallback-drlucas",
-    organizationId: "fallback-dr-lucas",
-    orgSlug: "dr-lucas",
-    orgName: "Dr. Lucas",
-    slug: "drlucas",
-    schema: "drlucas",
-    name: "Dr. Lucas",
-    persona: "Assistente",
-    description: "Atendimento clínico e agendamentos",
-    accent: "primary",
-    metaPhoneNumberId: "1238137526046869",
-    metaWabaId: "1014360307867907",
-    metaTokenEnv: "META_ACCESS_TOKEN_DRLUCAS",
-    metaTokenCipher: null,
-    leadSource: "none",
-    leadSourcePageId: null,
-    displayOrder: 0,
-  },
-];
-
 const TTL_MS = 30_000;
 
 type CatalogState = { at: number; agents: Agent[]; bySlug: Map<string, Agent> };
@@ -212,13 +143,13 @@ async function readCatalog(): Promise<CatalogState> {
     })
     .catch((err) => {
       console.error("Falha ao carregar public.agents:", err);
-      // Cache quente vence o fallback: dado real recente é melhor que o seed.
+      // Cache quente vale como ultima defesa contra uma falha momentanea do
+      // banco. Sem cache, o catalogo fica vazio de proposito: e melhor a tela
+      // dizer que nao ha agente do que servir um catalogo adivinhado, que
+      // apontaria schema errado. NAO devolve o estado ao cache, para a proxima
+      // request tentar o banco de novo em vez de esperar o TTL.
       if (catalogCache) return catalogCache;
-      // Guarda o fallback no cache para não bater no banco a cada request
-      // enquanto o catálogo não existir. O TTL faz a nova tentativa.
-      const state = buildState(FALLBACK_AGENTS);
-      catalogCache = state;
-      return state;
+      return buildState([]);
     })
     .finally(() => {
       inflight = null;
