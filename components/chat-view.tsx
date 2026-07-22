@@ -4,6 +4,7 @@ import type { ConversationRow, MessageRow } from "@/lib/queries";
 import type { ApprovedTemplate } from "@/lib/actions";
 import { ChannelIcon } from "./channel-icon";
 import { ChatControls } from "./chat-controls";
+import { SyncNowButton } from "./sync-now-button";
 import { cleanMessage, type MediaItem } from "@/lib/clean-content";
 import { formatDateTime, formatUSD } from "@/lib/utils";
 
@@ -49,11 +50,14 @@ export function ChatView({
             </span>
           </div>
         </div>
-        <div className="hidden shrink-0 items-center gap-1 rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs text-muted sm:flex">
-          <DollarSign className="size-3.5 text-accent" />
-          <span className="tnum font-medium text-fg">
-            {formatUSD(conversation.cost_usd)}
-          </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <SyncNowButton slug={slug} />
+          <div className="hidden items-center gap-1 rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs text-muted sm:flex">
+            <DollarSign className="size-3.5 text-accent" />
+            <span className="tnum font-medium text-fg">
+              {formatUSD(conversation.cost_usd)}
+            </span>
+          </div>
         </div>
       </div>
 

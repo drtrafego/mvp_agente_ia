@@ -116,6 +116,22 @@ export async function togglePauseAction(
   return { ok: true };
 }
 
+/**
+ * Dispara o sync das conversas (state.db do bot -> Neon) sob demanda, sem
+ * esperar o cron de 30 min, e revalida a tela pra re-buscar do Neon.
+ */
+export async function syncNowAction(slug: string): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
+  const res = await callPanel("/api/sync-now", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  revalidatePath(agentPath(agent, "/conversas"));
+  return { ok: true };
+}
+
 /** Envia texto livre direto pela WhatsApp Cloud API da Meta. */
 export async function sendReplyAction(
   slug: string,
