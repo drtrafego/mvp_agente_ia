@@ -38,6 +38,16 @@ function countVars(text: string): number {
 
 const GRAPH = "https://graph.facebook.com";
 
+/**
+ * Normaliza o destinatário para o formato que a Cloud API exige: só dígitos,
+ * sem "+", sem "@c.us", sem espaços (E.164 sem o sinal). Conversas de teste/
+ * simulação guardam um rótulo em vez de telefone; isso vira dígitos insuficientes
+ * e é barrado antes de chamar a Graph (senão a Meta devolve 131009).
+ */
+function normalizeRecipient(raw: unknown): string {
+  return String(raw ?? "").replace(/\D/g, "");
+}
+
 /** Interpreta o corpo de erro da Graph API e detecta a janela de 24h. */
 function parseMetaError(errText: string, status: number): {
   message: string;
@@ -45,6 +55,7 @@ function parseMetaError(errText: string, status: number): {
 } {
   let code: number | undefined;
   let msg = errText;
+  let details = "";
   try {
     const j = JSON.parse(errText) as {
       error?: {
@@ -56,8 +67,9 @@ function parseMetaError(errText: string, status: number): {
     };
     const e = j.error ?? {};
     code = e.code;
+    details = e.error_data?.details ?? "";
     msg = e.error_user_msg || e.message || errText;
-    errText = `${msg} ${e.error_data?.details ?? ""}`;
+    errText = `${msg} ${details}`;
   } catch {
     // corpo não-JSON: usa o texto cru
   }
@@ -66,12 +78,25 @@ function parseMetaError(errText: string, status: number): {
     /24\s*hours|re-?engage|outside.*window|message.*window|customer care window/i.test(
       errText,
     );
-  return {
-    message: outsideWindow
-      ? "Fora da janela de 24h — use um template aprovado para reengajar."
-      : msg?.trim() || `Falha no envio (HTTP ${status}).`,
-    outsideWindow,
-  };
+
+  // Mensagens amigáveis para os erros que o dono via como texto cru da Meta.
+  let message: string;
+  if (outsideWindow) {
+    message = "Fora da janela de 24h — use um template aprovado para reengajar.";
+  } else if (code === 131009) {
+    message =
+      "Contato sem número de WhatsApp válido (parece uma conversa de teste). " +
+      "Só dá para responder conversas com telefone real.";
+  } else if (code === 131058) {
+    message =
+      "O template hello_world só pode ser enviado por números de teste. " +
+      "Crie e aprove um template próprio na Meta (Business Manager) para reengajar.";
+  } else {
+    // Anexa o error_data.details da Meta, que diz QUAL parâmetro falhou.
+    const base = msg?.trim() || `Falha no envio (HTTP ${status}).`;
+    message = details.trim() ? `${base} — ${details.trim()}` : base;
+  }
+  return { message, outsideWindow };
 }
 
 async function postMessage(
@@ -87,7 +112,19 @@ async function postMessage(
       error: "Token da Meta não configurado para este agente.",
     };
   }
-  const to = String(body.to ?? "").replace(/^\+/, "");
+  const to = normalizeRecipient(body.to);
+  // wa_id válido tem entre 8 e 15 dígitos. Rótulo de conversa de teste ou
+  // contato sem telefone real cai aqui e recebe uma mensagem clara, em vez do
+  // 131009 ("Parameter value is not valid") cru da Meta.
+  if (to.length < 8 || to.length > 15) {
+    return {
+      ok: false,
+      messageId: "",
+      error:
+        "Contato sem número de WhatsApp válido (parece uma conversa de teste). " +
+        "Só dá para enviar para conversas com telefone real.",
+    };
+  }
   const url = `${GRAPH}/${META_GRAPH_VERSION}/${phoneNumberId}/messages`;
   try {
     const res = await fetch(url, {
@@ -191,7 +228,10 @@ export async function listApprovedTemplates(
     };
     const list = Array.isArray(data.data) ? data.data : [];
     return list
-      .filter((tpl) => tpl.status === "APPROVED" && tpl.name)
+      // hello_world é o template demo da Meta: só pode ser enviado de números
+      // de teste (erro 131058 em número de produção). Some da lista para não
+      // induzir o dono a um envio que sempre falha.
+      .filter((tpl) => tpl.status === "APPROVED" && tpl.name && tpl.name !== "hello_world")
       .map((tpl) => {
         const bodyComp = (tpl.components ?? []).find(
           (c) => (c.type ?? "").toUpperCase() === "BODY",
