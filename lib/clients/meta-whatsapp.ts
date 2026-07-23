@@ -82,7 +82,7 @@ function parseMetaError(errText: string, status: number): {
   // Mensagens amigáveis para os erros que o dono via como texto cru da Meta.
   let message: string;
   if (outsideWindow) {
-    message = "Fora da janela de 24h — use um template aprovado para reengajar.";
+    message = "Fora da janela de 24h. Use um template aprovado para reengajar.";
   } else if (code === 131009) {
     message =
       "Contato sem número de WhatsApp válido (parece uma conversa de teste). " +
@@ -94,7 +94,7 @@ function parseMetaError(errText: string, status: number): {
   } else {
     // Anexa o error_data.details da Meta, que diz QUAL parâmetro falhou.
     const base = msg?.trim() || `Falha no envio (HTTP ${status}).`;
-    message = details.trim() ? `${base} — ${details.trim()}` : base;
+    message = details.trim() ? `${base}. ${details.trim()}` : base;
   }
   return { message, outsideWindow };
 }
