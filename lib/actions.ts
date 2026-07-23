@@ -872,6 +872,89 @@ export async function saveAgendaConfig(
   }
 }
 
+// ---- Bloqueios de data específica (folga/viagem/uma data só) ----------
+// NÃO mexe na regra semanal. Só marca datas pontuais que o bot passa a pular.
+// Mapa {"AAAA-MM-DD": "motivo"} vive no container do bot (bloqueios.json),
+// escrito pela control API (/api/agenda-bloquear|desbloquear).
+export type AgendaBloqueio = { data: string; motivo: string };
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidDate(s: string): boolean {
+  if (!ISO_DATE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00`);
+  return !Number.isNaN(d.getTime()) && s === d.toISOString().slice(0, 10);
+}
+
+/** Lista as datas bloqueadas, ordenadas. Nunca lança: em erro retorna []. */
+export async function getAgendaBloqueios(slug: string): Promise<AgendaBloqueio[]> {
+  await assertAgentAccess(slug);
+  try {
+    const res = await callPanel(
+      `/api/agenda-bloqueios?agente=${encodeURIComponent(slug)}`,
+      { method: "GET" },
+    );
+    if (!res.ok) return [];
+    const raw = (res.data as { bloqueios?: unknown } | null)?.bloqueios;
+    if (!raw || typeof raw !== "object") return [];
+    return Object.entries(raw as Record<string, unknown>)
+      .filter(([d]) => ISO_DATE.test(d))
+      .map(([data, motivo]) => ({ data, motivo: String(motivo ?? "") }))
+      .sort((a, b) => a.data.localeCompare(b.data));
+  } catch {
+    return [];
+  }
+}
+
+export async function blockAgendaDate(
+  slug: string,
+  data: string,
+  motivo: string,
+): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
+  const dia = (data ?? "").trim();
+  if (!isValidDate(dia)) {
+    return { ok: false, error: "Data inválida. Use o seletor de data." };
+  }
+  try {
+    const res = await callPanel("/api/agenda-bloquear", {
+      method: "POST",
+      body: JSON.stringify({
+        agente: slug,
+        data: dia,
+        motivo: (motivo ?? "").trim().slice(0, 120),
+      }),
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    revalidatePath(agentPath(agent, "/horarios"));
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro ao bloquear a data." };
+  }
+}
+
+export async function unblockAgendaDate(
+  slug: string,
+  data: string,
+): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
+  const dia = (data ?? "").trim();
+  if (!isValidDate(dia)) {
+    return { ok: false, error: "Data inválida." };
+  }
+  try {
+    const res = await callPanel("/api/agenda-desbloquear", {
+      method: "POST",
+      body: JSON.stringify({ agente: slug, data: dia }),
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    revalidatePath(agentPath(agent, "/horarios"));
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Erro ao desbloquear a data." };
+  }
+}
+
 // ---- Follow-up automático (lembretes quando o lead para) ------------
 
 // Follow-up CONTEXTUAL: a Nina escreve cada lembrete lendo a conversa.
