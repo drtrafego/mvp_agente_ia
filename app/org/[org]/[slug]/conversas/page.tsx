@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { MessagesSquare, Inbox, UserSearch, MessageCircle, Mail } from "lucide-react";
+import { MessageCircle, Mail } from "lucide-react";
 import {
   getBotConversations,
   getConversation,
@@ -14,39 +14,17 @@ import {
   type ConvOrigin,
   type ConvFilter,
 } from "@/lib/queries";
-import { Badge } from "@/components/ui";
-import { ChatView } from "@/components/chat-view";
-import { OutreachChat } from "@/components/outreach-chat";
-import { DispatchView } from "@/components/dispatch-view";
-import { LeadCard } from "@/components/lead-card";
+import {
+  ConversasBoard,
+  type BoardItem,
+  type PanelPayload,
+} from "@/components/conversas-board";
 import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
 import { assertAgentAccess } from "@/lib/access";
 import { getMetaConfig } from "@/lib/meta-config";
-import { cn, formatNumber, timeAgo } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
-
-const ORIGIN_TONE: Record<
-  ConvOrigin,
-  "secondary" | "violet" | "neutral" | "accent"
-> = {
-  Anúncio: "secondary",
-  Prospecção: "violet",
-  Disparo: "accent",
-  Direto: "neutral",
-};
-
-type ListItem = {
-  key: string;
-  kind: "bot" | "outreach" | "dispatch";
-  href: string;
-  active: boolean;
-  title: string;
-  handle: string | null;
-  origin: ConvOrigin;
-  date: string | null;
-  count: number | null;
-};
 
 export default async function ConversasPage({
   params,
@@ -76,34 +54,57 @@ export default async function ConversasPage({
     getDispatchConvos(slug, ch, filter),
   ]);
 
-  const selectedBot = c ? await getConversation(slug, c) : null;
-  const selectedOutreach = o ? await getOutreachConvo(slug, o) : null;
-  const selectedDispatch = d ? await getDispatchConvo(slug, d) : null;
-  const anySelected = !!(selectedBot || selectedOutreach || selectedDispatch);
-
-  // Dados só do que estiver selecionado.
-  const messages = selectedBot
-    ? await getMessages(slug, selectedBot.session_id)
-    : [];
-  const paused = selectedBot?.chat_id ? await getPausedChatIds(slug) : [];
-  const isPaused = selectedBot?.chat_id
-    ? paused.includes(selectedBot.chat_id)
-    : false;
-  const lead = selectedBot ? await getLeadForConversation(selectedBot) : null;
   const sendEnabled = !!getMetaConfig(agent);
-  const templates =
-    selectedBot && sendEnabled ? await getApprovedTemplates(slug) : [];
-  const outreachMessages = selectedOutreach
-    ? await getOutreachMessages(selectedOutreach.id)
-    : [];
 
-  const fq = filter !== "all" ? `&f=${filter}` : "";
-  const items: ListItem[] = [
+  // Seleção inicial (deep-link, refresh ou "Atualizar agora"): monta o payload
+  // do painel no servidor. A troca de conversa em si é feita client-side pelo
+  // board, sem re-renderizar a lista.
+  let initialKey: string | null = null;
+  let initialPayload: PanelPayload | null = null;
+
+  if (c) {
+    const conversation = await getConversation(slug, c);
+    if (conversation) {
+      const [messages, paused, lead, templates] = await Promise.all([
+        getMessages(slug, conversation.session_id),
+        conversation.chat_id ? getPausedChatIds(slug) : Promise.resolve<string[]>([]),
+        getLeadForConversation(conversation),
+        sendEnabled ? getApprovedTemplates(slug) : Promise.resolve([]),
+      ]);
+      const isPaused = conversation.chat_id
+        ? paused.includes(conversation.chat_id)
+        : false;
+      initialKey = `bot:${conversation.session_id}`;
+      initialPayload = {
+        kind: "bot",
+        conversation,
+        messages,
+        isPaused,
+        sendEnabled,
+        templates,
+        lead,
+      };
+    }
+  } else if (o) {
+    const convo = await getOutreachConvo(slug, o);
+    if (convo) {
+      const messages = await getOutreachMessages(convo.id);
+      initialKey = `outreach:${convo.id}`;
+      initialPayload = { kind: "outreach", convo, messages };
+    }
+  } else if (d) {
+    const detail = await getDispatchConvo(slug, d);
+    if (detail) {
+      initialKey = `dispatch:${detail.phone_norm}`;
+      initialPayload = { kind: "dispatch", detail };
+    }
+  }
+
+  const items: BoardItem[] = [
     ...botConvos.map((cv) => ({
-      key: `b-${cv.session_id}`,
+      key: `bot:${cv.session_id}`,
       kind: "bot" as const,
-      href: `${basePath}/conversas?ch=${ch}${fq}&c=${encodeURIComponent(cv.session_id)}`,
-      active: selectedBot?.session_id === cv.session_id,
+      id: cv.session_id,
       title: cv.title ?? "Conversa sem título",
       handle: cv.chat_id,
       origin: cv.origin,
@@ -111,10 +112,9 @@ export default async function ConversasPage({
       count: cv.message_count,
     })),
     ...outreachConvos.map((oc) => ({
-      key: `o-${oc.id}`,
+      key: `outreach:${oc.id}`,
       kind: "outreach" as const,
-      href: `${basePath}/conversas?ch=${ch}${fq}&o=${encodeURIComponent(oc.id)}`,
-      active: selectedOutreach?.id === oc.id,
+      id: oc.id,
       title: oc.lead_name ?? oc.lead_handle ?? "Lead",
       handle: oc.lead_handle,
       origin: "Prospecção" as ConvOrigin,
@@ -122,10 +122,9 @@ export default async function ConversasPage({
       count: oc.msg_count,
     })),
     ...dispatchConvos.map((dc) => ({
-      key: `d-${dc.phone_norm}`,
+      key: `dispatch:${dc.phone_norm}`,
       kind: "dispatch" as const,
-      href: `${basePath}/conversas?ch=${ch}${fq}&d=${encodeURIComponent(dc.phone_norm)}`,
-      active: selectedDispatch?.phone_norm === dc.phone_norm,
+      id: dc.phone_norm,
       title: dc.full_name ?? dc.phone_norm,
       handle: dc.phone_norm,
       origin: "Disparo" as ConvOrigin,
@@ -154,99 +153,14 @@ export default async function ConversasPage({
         <FilterChips basePath={basePath} ch={ch} filter={filter} />
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-3">
-        {/* ---- Lista ---- */}
-        <aside
-          className={cn(
-            "flex min-h-0 w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft lg:w-80 xl:w-[22rem]",
-            anySelected && "hidden lg:flex",
-          )}
-        >
-          {items.length === 0 ? (
-            <EmptyList channel={ch} />
-          ) : (
-            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2.5">
-              {items.map((it) => (
-                <Link
-                  key={it.key}
-                  href={it.href}
-                  scroll={false}
-                  className={cn(
-                    "block rounded-xl border p-3 transition-all duration-150",
-                    it.active
-                      ? "border-secondary/40 bg-gradient-to-r from-secondary/15 to-accent-2/10 ring-1 ring-inset ring-secondary/25"
-                      : "border-transparent hover:border-border hover:bg-surface-2",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">
-                      {it.title}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-2">
-                      {timeAgo(it.date)}
-                    </span>
-                  </div>
-                  <div className="mt-1.5 flex items-center gap-2 text-xs text-muted">
-                    <Badge tone={ORIGIN_TONE[it.origin]}>{it.origin}</Badge>
-                    <span className="tnum truncate">
-                      {it.handle ?? "sem contato"}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-[11px] text-muted-2">
-                    <span className="tnum">
-                      {formatNumber(it.count ?? 0)} mensagens
-                    </span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </aside>
-
-        {/* ---- Chat ---- */}
-        <section
-          className={cn(
-            "min-h-0 flex-1 flex-col gap-3",
-            anySelected ? "flex" : "hidden lg:flex",
-          )}
-        >
-          {selectedBot ? (
-            <div className="min-h-0 flex-1">
-              <ChatView
-                slug={slug}
-                basePath={basePath}
-                conversation={selectedBot}
-                messages={messages}
-                isPaused={isPaused}
-                sendEnabled={sendEnabled}
-                templates={templates}
-              />
-            </div>
-          ) : selectedOutreach ? (
-            <div className="min-h-0 flex-1">
-              <OutreachChat
-                basePath={basePath}
-                ch={ch}
-                convo={selectedOutreach}
-                messages={outreachMessages}
-              />
-            </div>
-          ) : selectedDispatch ? (
-            <div className="min-h-0 flex-1">
-              <DispatchView basePath={basePath} ch={ch} detail={selectedDispatch} />
-            </div>
-          ) : (
-            <Placeholder />
-          )}
-        </section>
-
-        {/* ---- Painel do lead (só bot, desktop largo) ---- */}
-        {selectedBot ? (
-          <aside className="hidden min-h-0 w-[20rem] shrink-0 overflow-y-auto xl:block">
-            {lead ? <LeadCard lead={lead} /> : <NoAttribution />}
-          </aside>
-        ) : null}
-      </div>
+      <ConversasBoard
+        slug={slug}
+        basePath={basePath}
+        ch={ch}
+        items={items}
+        initialKey={initialKey}
+        initialPayload={initialPayload}
+      />
     </div>
   );
 }
@@ -325,58 +239,6 @@ function FilterChips({
           </Link>
         );
       })}
-    </div>
-  );
-}
-
-function Placeholder() {
-  return (
-    <div className="grid h-full place-items-center rounded-2xl border border-dashed border-border glass text-center">
-      <div>
-        <MessagesSquare className="mx-auto mb-3 size-8 text-muted-2" />
-        <p className="font-medium">Selecione uma conversa</p>
-        <p className="mt-1 text-sm text-muted">
-          Clique em um atendimento na lista para ver o histórico completo.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function NoAttribution() {
-  return (
-    <div className="grid h-full min-h-[12rem] place-items-center rounded-2xl border border-dashed border-border glass p-6 text-center">
-      <div>
-        <UserSearch className="mx-auto mb-2.5 size-7 text-muted-2" />
-        <p className="text-sm font-medium">Sem atribuição de campanha</p>
-        <p className="mt-1 text-xs text-muted">
-          Nenhum lead de formulário ou anúncio casou com este contato.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function EmptyList({ channel }: { channel: ConvChannel }) {
-  return (
-    <div className="grid flex-1 place-items-center p-10 text-center">
-      <div>
-        {channel === "email" ? (
-          <Mail className="mx-auto mb-3 size-8 text-muted-2" />
-        ) : (
-          <Inbox className="mx-auto mb-3 size-8 text-muted-2" />
-        )}
-        <p className="font-medium">
-          {channel === "email"
-            ? "Nenhuma conversa de e-mail"
-            : "Nenhuma conversa ainda"}
-        </p>
-        <p className="mt-1 text-sm text-muted">
-          {channel === "email"
-            ? "Não há atendimentos nem prospecção por e-mail para este agente."
-            : "Este agente ainda não registrou atendimentos."}
-        </p>
-      </div>
     </div>
   );
 }
