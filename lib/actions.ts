@@ -16,6 +16,7 @@ import {
   listApprovedTemplates,
   type ApprovedTemplate,
 } from "./clients/meta-whatsapp";
+import { expandCampaignVars, resolveVarCount } from "./utils";
 
 const BASE_URL =
   process.env.HERMES_PANEL_URL ?? "https://hermes.casaldotrafego.com/agente";
@@ -252,13 +253,15 @@ export async function sendTemplateToLeads(
   varCount = 0,
 ): Promise<OutreachSummary> {
   const agent = await assertAgentAccess(slug);
+  // Disparo avulso: o {{1}} continua sendo o nome do lead (token {nome}) e o
+  // usuário preenche {{2}}..{{N}}. Reconstrói a lista posicional completa.
+  const params = expandCampaignVars(sharedParams, varCount);
   return sendTemplateToLeadsInternal(
     agent,
     targets,
     templateName,
     lang,
-    sharedParams,
-    varCount,
+    params,
   );
 }
 
@@ -269,7 +272,10 @@ export type Campaign = {
   name: string;
   templateName: string;
   templateLang: string;
+  /** Lista posicional das variáveis salvas ({{1}}..{{N}} no formato novo). */
   vars: string[];
+  /** varCount efetivo do template no momento em que a campanha foi salva. */
+  varCount: number;
   body: string;
   createdAt: string | null;
 };
@@ -302,6 +308,11 @@ async function ensureCampaignsTable(): Promise<void> {
        active boolean default true
      )`,
   );
+  // Aditivo: guarda o varCount do template p/ distinguir formato novo (N
+  // posições) do legado (N-1). Linhas antigas ficam NULL e caem no fallback.
+  await sql.unsafe(
+    `alter table public.campaigns add column if not exists template_var_count integer`,
+  );
   await sql.unsafe(
     `create index if not exists campaigns_agent_idx on public.campaigns (agent_slug)`,
   );
@@ -314,6 +325,7 @@ export async function createCampaign(
     templateName: string;
     lang: string;
     vars: string[];
+    varCount?: number;
     body: string;
   },
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
@@ -329,11 +341,12 @@ export async function createCampaign(
       .toString(36)
       .slice(2, 8)}`;
     const vars = (data.vars ?? []).map((v) => v.trim());
+    const varCount = data.varCount != null ? data.varCount : vars.length;
 
     await sql.unsafe(
       `insert into public.campaigns
-         (id, agent_slug, name, template_name, template_lang, template_vars, template_body, active)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7, true)`,
+         (id, agent_slug, name, template_name, template_lang, template_vars, template_body, template_var_count, active)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, true)`,
       [
         id,
         slug,
@@ -342,6 +355,7 @@ export async function createCampaign(
         data.lang || "pt_BR",
         vars,
         data.body ?? "",
+        varCount,
       ],
     );
     revalidatePath(agentPath(agent, "/campaigns"));
@@ -359,6 +373,7 @@ export async function updateCampaign(
     templateName: string;
     lang: string;
     vars: string[];
+    varCount?: number;
     body: string;
   },
 ): Promise<ActionResult> {
@@ -372,6 +387,7 @@ export async function updateCampaign(
 
     await ensureCampaignsTable();
     const vars = (data.vars ?? []).map((v) => v.trim());
+    const varCount = data.varCount != null ? data.varCount : vars.length;
 
     await sql.unsafe(
       `update public.campaigns set
@@ -379,7 +395,8 @@ export async function updateCampaign(
          template_name = $4,
          template_lang = $5,
          template_vars = $6::jsonb,
-         template_body = $7
+         template_body = $7,
+         template_var_count = $8
        where id = $1 and agent_slug = $2`,
       [
         id,
@@ -389,6 +406,7 @@ export async function updateCampaign(
         data.lang || "pt_BR",
         vars,
         data.body ?? "",
+        varCount,
       ],
     );
     revalidatePath(agentPath(agent, "/campaigns"));
@@ -408,26 +426,31 @@ export async function listCampaigns(slug: string): Promise<Campaign[]> {
         template_name: string | null;
         template_lang: string | null;
         template_vars: unknown;
+        template_var_count: number | null;
         template_body: string | null;
         created_at: string | null;
       }[]
     >(
       `select id, name, template_name, template_lang, template_vars,
-              template_body, created_at
+              template_var_count, template_body, created_at
        from public.campaigns
        where agent_slug = $1 and active = true
        order by created_at desc nulls last`,
       [slug],
     );
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name ?? "Campanha",
-      templateName: r.template_name ?? "",
-      templateLang: r.template_lang ?? "pt_BR",
-      vars: parseVars(r.template_vars),
-      body: r.template_body ?? "",
-      createdAt: r.created_at,
-    }));
+    return rows.map((r) => {
+      const vars = parseVars(r.template_vars);
+      return {
+        id: r.id,
+        name: r.name ?? "Campanha",
+        templateName: r.template_name ?? "",
+        templateLang: r.template_lang ?? "pt_BR",
+        vars,
+        varCount: resolveVarCount(r.template_var_count, vars),
+        body: r.template_body ?? "",
+        createdAt: r.created_at,
+      };
+    });
   } catch {
     return [];
   }
@@ -473,9 +496,10 @@ export async function dispatchCampaign(
         template_name: string | null;
         template_lang: string | null;
         template_vars: unknown;
+        template_var_count: number | null;
       }[]
     >(
-      `select template_name, template_lang, template_vars
+      `select template_name, template_lang, template_vars, template_var_count
        from public.campaigns
        where id = $1 and agent_slug = $2 and active = true
        limit 1`,
@@ -484,16 +508,16 @@ export async function dispatchCampaign(
     if (!row?.template_name) return fail("Campanha não encontrada.");
 
     const vars = parseVars(row.template_vars);
-    // varCount = 1 (nome) + variáveis compartilhadas salvas.
-    const varCount = 1 + vars.length;
+    const varCount = resolveVarCount(row.template_var_count, vars);
+    // Lista posicional completa; o token {nome} vira o nome de cada lead.
+    const params = expandCampaignVars(vars, varCount);
 
     return await sendTemplateToLeadsInternal(
       agent,
       targets,
       row.template_name,
       row.template_lang ?? "pt_BR",
-      vars,
-      varCount,
+      params,
     );
   } catch {
     return fail("Erro inesperado no disparo da campanha.");
@@ -543,6 +567,11 @@ async function ensureScheduledTable(): Promise<void> {
        result text
      )`,
   );
+  // Aditivo: varCount do template do disparo (formato novo). Linhas antigas
+  // ficam NULL e o runner reconstrói o legado (nome automático no {{1}}).
+  await sql.unsafe(
+    `alter table public.scheduled_dispatches add column if not exists template_var_count integer`,
+  );
   await sql.unsafe(
     `create index if not exists scheduled_dispatches_agent_status_idx
        on public.scheduled_dispatches (agent_slug, status)`,
@@ -556,6 +585,7 @@ export async function createScheduledDispatch(
     templateName: string;
     lang: string;
     vars: string[];
+    varCount?: number;
     phones: string[];
     scheduledAt: string | null;
   },
@@ -578,13 +608,14 @@ export async function createScheduledDispatch(
       .slice(2, 8)}`;
     const scheduledAt = input.scheduledAt ?? new Date().toISOString();
     const vars = (input.vars ?? []).map((v) => v.trim());
+    const varCount = input.varCount != null ? input.varCount : null;
 
     await sql`
       insert into public.scheduled_dispatches
         (id, agent_slug, campaign_id, template_name, template_lang,
-         template_vars, kind, target_phones, scheduled_at, status, enabled, created_at)
+         template_vars, template_var_count, kind, target_phones, scheduled_at, status, enabled, created_at)
       values (${id}, ${slug}, ${input.campaignId ?? null}, ${input.templateName},
-              ${input.lang || "pt_BR"}, ${sql.json(vars)}, 'selected',
+              ${input.lang || "pt_BR"}, ${sql.json(vars)}, ${varCount}, 'selected',
               ${sql.json(phones)}, ${scheduledAt}, 'pending', true, now())
     `;
     revalidatePath(agentPath(agent, "/disparos"));
@@ -698,15 +729,17 @@ export async function setAutoRecovery(
     let tplName = "";
     let tplLang = "pt_BR";
     let vars: string[] = [];
+    let varCount: number | null = null;
     if (input.campaignId) {
       const [c] = await sql.unsafe<
         {
           template_name: string | null;
           template_lang: string | null;
           template_vars: unknown;
+          template_var_count: number | null;
         }[]
       >(
-        `select template_name, template_lang, template_vars
+        `select template_name, template_lang, template_vars, template_var_count
          from public.campaigns where id = $1 and agent_slug = $2 limit 1`,
         [input.campaignId, slug],
       );
@@ -714,6 +747,7 @@ export async function setAutoRecovery(
         tplName = c.template_name ?? "";
         tplLang = c.template_lang ?? "pt_BR";
         vars = toStrArray(c.template_vars);
+        varCount = c.template_var_count;
       }
     }
 
@@ -721,15 +755,16 @@ export async function setAutoRecovery(
     await sql`
       insert into public.scheduled_dispatches
         (id, agent_slug, campaign_id, template_name, template_lang, template_vars,
-         kind, target_phones, scheduled_at, status, enabled, created_at)
+         template_var_count, kind, target_phones, scheduled_at, status, enabled, created_at)
       values (${id}, ${slug}, ${input.campaignId || null}, ${tplName}, ${tplLang},
-              ${sql.json(vars)}, 'auto_aguardando', ${sql.json([])}, null,
+              ${sql.json(vars)}, ${varCount}, 'auto_aguardando', ${sql.json([])}, null,
               'pending', ${input.enabled}, now())
       on conflict (id) do update set
         campaign_id = excluded.campaign_id,
         template_name = excluded.template_name,
         template_lang = excluded.template_lang,
         template_vars = excluded.template_vars,
+        template_var_count = excluded.template_var_count,
         enabled = excluded.enabled
     `;
     revalidatePath(agentPath(agent, "/disparos"));

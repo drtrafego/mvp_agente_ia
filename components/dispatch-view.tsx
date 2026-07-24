@@ -3,12 +3,15 @@ import { ArrowLeft, MessageCircle, Send, Clock } from "lucide-react";
 import type { DispatchDetail, ConvChannel } from "@/lib/queries";
 import { formatDateTime } from "@/lib/utils";
 
+// `vars` é a lista posicional completa {{1}}..{{N}}. Troca {{n}} pelo valor da
+// posição e, dentro dele, o token {nome} pelo nome do lead.
 function fillPreview(body: string, name: string, vars: string[]): string {
+  const sample = name || "cliente";
   return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, num: string) => {
-    const n = Number(num);
-    if (n === 1) return name || "{{1}}";
-    const v = vars[n - 2];
-    return v && v.trim() ? v : `{{${n}}}`;
+    const v = vars[Number(num) - 1];
+    if (v == null) return `{{${num}}}`;
+    const filled = v.replace(/\{\{?\s*nome\s*\}?\}/gi, sample);
+    return filled.trim() ? filled : `{{${num}}}`;
   });
 }
 

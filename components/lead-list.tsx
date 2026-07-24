@@ -36,7 +36,12 @@ import {
 } from "@/lib/actions";
 import { Badge } from "./ui";
 import { ModalPortal } from "./modal-portal";
-import { formatDate, formatDateShort, formatDateTime } from "@/lib/utils";
+import {
+  formatDate,
+  formatDateShort,
+  formatDateTime,
+  expandCampaignVars,
+} from "@/lib/utils";
 
 const FIELD_LABELS: Record<string, string> = {
   full_name: "Nome",
@@ -376,16 +381,18 @@ export function LeadList({
   );
 }
 
+// `vars` é a lista posicional completa {{1}}..{{N}}. Cada valor pode conter o
+// token {nome}, trocado aqui pelo nome de exemplo para a prévia.
 function fillPreview(
   body: string,
-  leadName: string,
-  sharedParams: string[],
+  sampleName: string,
+  vars: string[],
 ): string {
   return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, num: string) => {
-    const n = Number(num);
-    if (n === 1) return leadName || "{{1}}";
-    const v = sharedParams[n - 2];
-    return v && v.trim() ? v : `{{${n}}}`;
+    const v = vars[Number(num) - 1];
+    if (v == null) return `{{${num}}}`;
+    const filled = v.replace(/\{\{?\s*nome\s*\}?\}/gi, sampleName);
+    return filled.trim() ? filled : `{{${num}}}`;
   });
 }
 
@@ -459,6 +466,7 @@ function ScheduleModal({
               templateName: campaign.templateName,
               lang: campaign.templateLang,
               vars: campaign.vars,
+              varCount: campaign.varCount,
             }
           : null
         : tpl
@@ -467,6 +475,7 @@ function ScheduleModal({
               templateName: tpl.name,
               lang: tpl.language,
               vars: shared.slice(0, sharedNeeded),
+              varCount,
             }
           : null;
 
@@ -582,7 +591,7 @@ function ScheduleModal({
                     {fillPreview(
                       campaign.body,
                       targets[0]?.name?.trim() || "cliente",
-                      campaign.vars,
+                      expandCampaignVars(campaign.vars, campaign.varCount),
                     )}
                   </p>
                 ) : null}
@@ -903,7 +912,11 @@ function CampaignModal({
                             Prévia para {firstName}
                           </p>
                           <p className="whitespace-pre-wrap rounded-lg border border-secondary/25 bg-gradient-to-br from-secondary/15 to-accent-2/10 px-3 py-2.5 text-sm text-fg">
-                            {fillPreview(campaign.body, firstName, campaign.vars)}
+                            {fillPreview(
+                              campaign.body,
+                              firstName,
+                              expandCampaignVars(campaign.vars, campaign.varCount),
+                            )}
                           </p>
                         </div>
                       ) : null}
@@ -1000,7 +1013,7 @@ function CampaignModal({
                     Prévia para {firstName}
                   </p>
                   <p className="whitespace-pre-wrap rounded-lg border border-secondary/25 bg-gradient-to-br from-secondary/15 to-accent-2/10 px-3 py-2.5 text-sm text-fg">
-                    {fillPreview(tpl.body, firstName, shared)}
+                    {fillPreview(tpl.body, firstName, ["{nome}", ...shared])}
                   </p>
                 </div>
               ) : null}

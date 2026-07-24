@@ -126,3 +126,41 @@ export function pctDelta(
 export function formatPct(value: number, digits = 0): string {
   return `${value.toFixed(digits)}%`;
 }
+
+// ---- Variáveis de template de WhatsApp (campanhas/disparos) ----------
+// Regra: cada variável do template ({{1}}..{{N}}) pode ter um valor FIXO ou o
+// token {nome} (aceita também {{nome}}), que é trocado pelo nome do lead na
+// hora do disparo. O {{1}} deixou de ser "nome automático" e virou editável.
+
+/** Troca o token {nome} / {{nome}} (case-insensitive) pelo nome do lead. */
+export function fillNameToken(value: string, leadName: string): string {
+  const name = (leadName ?? "").trim() || "tudo bem";
+  return (value ?? "").replace(/\{\{?\s*nome\s*\}?\}/gi, name);
+}
+
+/**
+ * Reconstrói a lista posicional completa {{1}}..{{N}} das variáveis salvas.
+ * Campanhas novas guardam as N posições; as antigas guardavam só {{2}}..{{N}}
+ * (o {{1}} era sempre o nome). Quando faltam posições, o {{1}} vira o token
+ * {nome} e as posições restantes são completadas com string vazia.
+ */
+export function expandCampaignVars(vars: string[], varCount: number): string[] {
+  if (!Number.isFinite(varCount) || varCount <= 0) return [];
+  const src = Array.isArray(vars) ? vars : [];
+  if (src.length >= varCount) return src.slice(0, varCount);
+  const full = ["{nome}", ...src];
+  while (full.length < varCount) full.push("");
+  return full.slice(0, varCount);
+}
+
+/**
+ * varCount efetivo de uma campanha/disparo salvo. Usa o valor persistido
+ * (formato novo, N posições) ou reconstrói do legado (1 nome + N-1 salvos).
+ */
+export function resolveVarCount(
+  storedVarCount: number | null | undefined,
+  vars: string[],
+): number {
+  if (storedVarCount != null && storedVarCount > 0) return storedVarCount;
+  return 1 + (Array.isArray(vars) ? vars.length : 0);
+}

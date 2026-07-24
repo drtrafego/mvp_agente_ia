@@ -4,6 +4,7 @@ import { sql } from "./db";
 import type { Agent } from "./agents";
 import { getMetaConfig, getMetaToken } from "./meta-config";
 import { sendWhatsappTemplate } from "./clients/meta-whatsapp";
+import { fillNameToken } from "./utils";
 
 /**
  * Caminho INTERNO do disparo em massa.
@@ -57,13 +58,21 @@ async function ensureOutreachTable(): Promise<void> {
  * preencheu o form mas não conversou). Envio direto pela Meta, com delay entre
  * mensagens; grava cada resultado em public.outreach_sent. Nunca lança 500.
  */
+/**
+ * Dispara um template para uma lista de leads.
+ *
+ * `params` é a lista POSICIONAL completa das variáveis do template
+ * ({{1}}..{{N}}, length = varCount). Cada item é um valor fixo OU contém o
+ * token {nome} (também {{nome}}), que é trocado pelo nome de CADA lead na hora
+ * do envio. Assim o {{1}} deixou de ser "nome automático" e virou apenas mais
+ * uma posição editável: quem quiser o nome ali escreve {nome}.
+ */
 export async function sendTemplateToLeadsInternal(
   agent: Agent,
   targets: OutreachTarget[],
   templateName: string,
   lang: string,
-  sharedParams: string[] = [],
-  varCount = 0,
+  params: string[] = [],
 ): Promise<OutreachSummary> {
   const slug = agent.slug;
   const fail = (error: string): OutreachSummary => ({
@@ -84,14 +93,9 @@ export async function sendTemplateToLeadsInternal(
     if (!Array.isArray(targets) || targets.length === 0)
       return fail("Nenhum lead selecionado.");
 
-    // {{1}} = nome do lead (por lead); {{2}}..{{n}} = compartilhados.
-    const shared = sharedParams.map((p) => p.trim());
-    if (varCount > 1 && shared.length < varCount - 1) {
-      return fail(
-        `Preencha as ${varCount - 1} variáveis compartilhadas do template.`,
-      );
-    }
-    const sharedForTemplate = varCount > 1 ? shared.slice(0, varCount - 1) : [];
+    // Lista posicional completa das variáveis ({{1}}..{{N}}). Cada posição é
+    // um valor fixo ou o token {nome}, resolvido por lead mais abaixo.
+    const templateParams = (params ?? []).map((p) => String(p ?? ""));
 
     try {
       await ensureOutreachTable();
@@ -113,11 +117,9 @@ export async function sendTemplateToLeadsInternal(
         continue;
       }
 
-      // Monta bodyParams por lead: [nome, ...compartilhados]. Sem variáveis → [].
-      const bodyParams =
-        varCount === 0
-          ? []
-          : [name.trim() || "tudo bem", ...sharedForTemplate];
+      // Monta bodyParams por lead: cada posição com o token {nome} vira o nome
+      // deste lead; valores fixos passam intactos. Sem variáveis → [].
+      const bodyParams = templateParams.map((p) => fillNameToken(p, name));
 
       const r = await sendWhatsappTemplate(
         phone,

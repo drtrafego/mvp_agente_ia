@@ -3,6 +3,7 @@ import { sql } from "./db";
 import { getAgent, requireAgent, safeSchema, type Agent } from "./agents";
 import { assertIdent } from "./identifier";
 import { getLeadSource } from "./meta-config";
+import { expandCampaignVars, resolveVarCount } from "./utils";
 
 export type PortalStat = {
   slug: string;
@@ -445,18 +446,25 @@ export async function getDispatchConvo(
     let vars: string[] = [];
     if (os.template_name) {
       const [c] = await sql.unsafe<
-        { template_body: string | null; template_vars: unknown }[]
+        {
+          template_body: string | null;
+          template_vars: unknown;
+          template_var_count: number | null;
+        }[]
       >(
-        `select template_body, template_vars from public.campaigns
+        `select template_body, template_vars, template_var_count from public.campaigns
          where agent_slug = $1 and template_name = $2 and active = true
          order by created_at desc nulls last limit 1`,
         [slug, os.template_name],
       );
       if (c) {
         body = c.template_body ?? null;
-        vars = Array.isArray(c.template_vars)
+        const raw = Array.isArray(c.template_vars)
           ? (c.template_vars as unknown[]).map((v) => String(v))
           : [];
+        // Lista posicional completa ({{1}}..{{N}}), com o {{1}} do legado
+        // reconstruído como {nome}. O dispatch-view resolve o token por lead.
+        vars = expandCampaignVars(raw, resolveVarCount(c.template_var_count, raw));
       }
     }
 

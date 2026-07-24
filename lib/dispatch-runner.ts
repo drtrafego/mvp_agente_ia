@@ -4,6 +4,7 @@ import { getAgent } from "./agents";
 import { assertIdent } from "./identifier";
 import { getLeadSource } from "./meta-config";
 import { sendTemplateToLeadsInternal } from "./outreach";
+import { expandCampaignVars, resolveVarCount } from "./utils";
 
 // Máximo de envios por dispatch em cada execução do cron (evita timeout).
 const BATCH = 25;
@@ -15,6 +16,7 @@ type SchedRow = {
   template_name: string | null;
   template_lang: string | null;
   template_vars: unknown;
+  template_var_count: number | null;
   target_phones: unknown;
 };
 
@@ -116,14 +118,15 @@ async function processSelected(d: SchedRow): Promise<number> {
     src.leadSource === "form" ? await nameMap(src.pageId, batch) : new Map();
   const targets = batch.map((p) => ({ phone: p, name: names.get(p) ?? "" }));
   const vars = toStrArray(d.template_vars);
+  const varCount = resolveVarCount(d.template_var_count, vars);
+  const params = expandCampaignVars(vars, varCount);
 
   const res = await sendTemplateToLeadsInternal(
     record,
     targets,
     templateName,
     d.template_lang ?? "pt_BR",
-    vars,
-    1 + vars.length,
+    params,
   );
 
   const done = remaining.length <= BATCH;
@@ -185,13 +188,15 @@ async function processAuto(d: SchedRow): Promise<number> {
     .filter((l) => l.phone_norm)
     .map((l) => ({ phone: String(l.phone_norm), name: l.full_name ?? "" }));
 
+  const varCount = resolveVarCount(d.template_var_count, vars);
+  const params = expandCampaignVars(vars, varCount);
+
   const res = await sendTemplateToLeadsInternal(
     record,
     targets,
     templateName,
     d.template_lang ?? "pt_BR",
-    vars,
-    1 + vars.length,
+    params,
   );
   await markResult(d.id, null, `Auto: ${res.enviados} enviados.`);
   return res.enviados;
@@ -209,7 +214,7 @@ export async function runDispatches(): Promise<{
   try {
     const rows = await sql.unsafe<SchedRow[]>(
       `select id, agent_slug, campaign_id, template_name, template_lang,
-              template_vars, target_phones
+              template_vars, template_var_count, target_phones
        from public.scheduled_dispatches
        where kind = 'selected' and status = 'pending'
          and scheduled_at is not null and scheduled_at <= now()
@@ -231,7 +236,7 @@ export async function runDispatches(): Promise<{
   try {
     const autos = await sql.unsafe<SchedRow[]>(
       `select id, agent_slug, campaign_id, template_name, template_lang,
-              template_vars, target_phones
+              template_vars, template_var_count, target_phones
        from public.scheduled_dispatches
        where kind = 'auto_aguardando' and enabled = true
        limit 10`,

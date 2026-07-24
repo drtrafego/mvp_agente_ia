@@ -24,14 +24,16 @@ import {
 } from "@/lib/actions";
 import { Card, Badge } from "@/components/ui";
 import { ModalPortal } from "@/components/modal-portal";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTime, expandCampaignVars } from "@/lib/utils";
 
-function fillPreview(body: string, leadName: string, vars: string[]): string {
+// Preview: substitui {{n}} pelo valor da variável n e, dentro dele, o token
+// {nome} pelo nome de exemplo. Espera `vars` como lista posicional {{1}}..{{N}}.
+function fillPreview(body: string, sampleName: string, vars: string[]): string {
   return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, num: string) => {
-    const n = Number(num);
-    if (n === 1) return leadName;
-    const v = vars[n - 2];
-    return v && v.trim() ? v : `{{${n}}}`;
+    const v = vars[Number(num) - 1];
+    if (v == null) return `{{${num}}}`;
+    const filled = v.replace(/\{\{?\s*nome\s*\}?\}/gi, sampleName);
+    return filled.trim() ? filled : `{{${num}}}`;
   });
 }
 
@@ -152,7 +154,11 @@ export function CampaignsManager({
 
               {c.body ? (
                 <p className="whitespace-pre-wrap rounded-xl border border-border bg-surface-2/50 px-3.5 py-3 text-sm leading-relaxed text-muted">
-                  {fillPreview(c.body, "[nome do lead]", c.vars)}
+                  {fillPreview(
+                    c.body,
+                    "[nome do lead]",
+                    expandCampaignVars(c.vars, c.varCount),
+                  )}
                 </p>
               ) : null}
 
@@ -180,18 +186,23 @@ export function CampaignsManager({
   );
 }
 
-function seedShared(
+// Semeia as N posições ({{1}}..{{N}}) ao abrir uma campanha para edição.
+// Campanha nova (formato novo) já traz as N posições; campanha antiga trazia
+// só {{2}}..{{N}}, então o {{1}} é reconstruído como o token {nome}.
+function seedVars(
   campaign: Campaign,
   templates: ApprovedTemplate[],
 ): string[] {
   const tpl = templates.find((t) => t.name === campaign.templateName);
-  const varCount = tpl?.varCount ?? campaign.vars.length + 1;
-  const need = Math.max(0, varCount - 1);
-  const arr = Array(need).fill("");
-  campaign.vars.forEach((v, i) => {
-    if (i < need) arr[i] = v;
-  });
-  return arr;
+  const varCount = tpl?.varCount ?? campaign.varCount;
+  return expandCampaignVars(campaign.vars, varCount);
+}
+
+// Valor padrão das N posições ao criar/trocar template: {{1}} = {nome}
+// (mantém o comportamento antigo por default), demais vazias.
+function defaultVars(varCount: number): string[] {
+  if (varCount <= 0) return [];
+  return Array.from({ length: varCount }, (_, i) => (i === 0 ? "{nome}" : ""));
 }
 
 function CampaignFormModal({
@@ -210,18 +221,20 @@ function CampaignFormModal({
   const isEdit = mode === "edit" && campaign !== null;
 
   const [name, setName] = React.useState(isEdit ? campaign!.name : "");
-  const [tplName, setTplName] = React.useState(
-    isEdit ? campaign!.templateName : (templates[0]?.name ?? ""),
-  );
-  const [shared, setShared] = React.useState<string[]>(() =>
-    isEdit ? seedShared(campaign!, templates) : [],
-  );
+  const initialTplName = isEdit
+    ? campaign!.templateName
+    : (templates[0]?.name ?? "");
+  const [tplName, setTplName] = React.useState(initialTplName);
+  const [vars, setVars] = React.useState<string[]>(() => {
+    if (isEdit) return seedVars(campaign!, templates);
+    const initialTpl = templates.find((t) => t.name === initialTplName);
+    return defaultVars(initialTpl?.varCount ?? 0);
+  });
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const tpl = templates.find((t) => t.name === tplName) ?? null;
   const varCount = tpl?.varCount ?? 0;
-  const sharedNeeded = Math.max(0, varCount - 1);
 
   // Só reseta as variáveis quando o template REALMENTE muda (não no mount,
   // para preservar os valores já preenchidos ao editar).
@@ -229,10 +242,10 @@ function CampaignFormModal({
   React.useEffect(() => {
     if (prevTpl.current !== tplName) {
       prevTpl.current = tplName;
-      setShared(Array(sharedNeeded).fill(""));
+      setVars(defaultVars(varCount));
     }
     setError(null);
-  }, [tplName, sharedNeeded]);
+  }, [tplName, varCount]);
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -246,17 +259,10 @@ function CampaignFormModal({
     };
   }, [onClose, saving]);
 
-  const missing =
-    sharedNeeded > 0 && shared.slice(0, sharedNeeded).some((v) => !v.trim());
-
   async function salvar() {
     if (!tpl || saving) return;
     if (!name.trim()) {
       setError("Dê um nome à campanha.");
-      return;
-    }
-    if (missing) {
-      setError("Preencha todas as variáveis do template.");
       return;
     }
     setSaving(true);
@@ -265,7 +271,8 @@ function CampaignFormModal({
       name: name.trim(),
       templateName: tpl.name,
       lang: tpl.language,
-      vars: shared.slice(0, sharedNeeded),
+      vars: vars.slice(0, varCount).map((v) => v ?? ""),
+      varCount,
       body: tpl.body,
     };
     const res = isEdit
@@ -363,34 +370,37 @@ function CampaignFormModal({
           ) : null}
 
           {varCount >= 1 ? (
-            <div className="flex items-center gap-1.5 rounded-lg border border-accent-2/30 bg-accent-2/10 px-3 py-2 text-xs text-[#c4b5fd]">
-              <User className="size-3.5 shrink-0" />
+            <div className="flex items-start gap-1.5 rounded-lg border border-accent-2/30 bg-accent-2/10 px-3 py-2 text-xs text-[#c4b5fd]">
+              <User className="mt-0.5 size-3.5 shrink-0" />
               <span>
-                <strong>{"{{1}}"}</strong> = nome do lead (automático no disparo)
+                Digite um valor fixo em cada variável OU escreva{" "}
+                <strong>{"{nome}"}</strong> para preencher com o nome do lead
+                automaticamente no disparo.
               </span>
             </div>
           ) : null}
 
-          {sharedNeeded > 0 ? (
+          {varCount >= 1 ? (
             <div className="space-y-2">
               <p className="text-[11px] uppercase tracking-wide text-muted-2">
-                Variáveis (valem para todos os leads)
+                Variáveis do template
               </p>
-              {Array.from({ length: sharedNeeded }).map((_, idx) => (
+              {Array.from({ length: varCount }).map((_, idx) => (
                 <div key={idx}>
                   <label className="mb-1 block text-xs font-medium text-muted">
-                    Variável {idx + 2} {`{{${idx + 2}}}`}
+                    Variável {idx + 1} {`{{${idx + 1}}}`}
                   </label>
                   <input
-                    value={shared[idx] ?? ""}
+                    value={vars[idx] ?? ""}
                     onChange={(e) =>
-                      setShared((prev) => {
+                      setVars((prev) => {
                         const next = [...prev];
+                        while (next.length < varCount) next.push("");
                         next[idx] = e.target.value;
                         return next;
                       })
                     }
-                    placeholder={`Conteúdo da variável ${idx + 2}`}
+                    placeholder="valor fixo ou {nome}"
                     className="w-full rounded-lg border border-border bg-surface-2 px-3 py-2.5 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
                   />
                 </div>
@@ -404,7 +414,7 @@ function CampaignFormModal({
                 Prévia
               </p>
               <p className="whitespace-pre-wrap rounded-lg border border-secondary/25 bg-gradient-to-br from-secondary/15 to-accent-2/10 px-3 py-2.5 text-sm text-fg">
-                {fillPreview(tpl.body, "[nome do lead]", shared)}
+                {fillPreview(tpl.body, "[nome do lead]", vars)}
               </p>
             </div>
           ) : null}
@@ -420,7 +430,7 @@ function CampaignFormModal({
         <div className="border-t border-border p-4">
           <button
             onClick={salvar}
-            disabled={saving || !tpl || !name.trim() || missing}
+            disabled={saving || !tpl || !name.trim()}
             className="brand-gradient flex w-full items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-medium text-white shadow-[0_6px_18px_-8px_rgba(99,102,241,0.8)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? (
