@@ -26,6 +26,14 @@ import { Card, Badge } from "@/components/ui";
 import { ModalPortal } from "@/components/modal-portal";
 import { formatDateTime, expandCampaignVars } from "@/lib/utils";
 
+// Tokens dinâmicos que o usuário pode inserir numa variável. São trocados pelo
+// dado real do lead no momento do disparo. Hoje só o nome é suportado
+// (ver fillNameToken em lib/utils). Para adicionar outro, incluir aqui E no
+// preenchimento do disparo.
+const AVAILABLE_TOKENS: { token: string; label: string }[] = [
+  { token: "{nome}", label: "nome do lead" },
+];
+
 // Preview: substitui {{n}} pelo valor da variável n e, dentro dele, o token
 // {nome} pelo nome de exemplo. Espera `vars` como lista posicional {{1}}..{{N}}.
 function fillPreview(body: string, sampleName: string, vars: string[]): string {
@@ -232,9 +240,23 @@ function CampaignFormModal({
   });
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Qual variável está em foco, para o clique nos tokens inserir no campo certo.
+  const [focusedVar, setFocusedVar] = React.useState(0);
 
   const tpl = templates.find((t) => t.name === tplName) ?? null;
   const varCount = tpl?.varCount ?? 0;
+
+  // Insere o token no fim da variável que está em foco (ou na primeira).
+  function insertToken(token: string) {
+    setVars((prev) => {
+      const next = [...prev];
+      while (next.length < varCount) next.push("");
+      const i = focusedVar >= 0 && focusedVar < varCount ? focusedVar : 0;
+      const cur = next[i] ?? "";
+      next[i] = cur ? `${cur}${token}` : token;
+      return next;
+    });
+  }
 
   // Só reseta as variáveis quando o template REALMENTE muda (não no mount,
   // para preservar os valores já preenchidos ao editar).
@@ -370,13 +392,32 @@ function CampaignFormModal({
           ) : null}
 
           {varCount >= 1 ? (
-            <div className="flex items-start gap-1.5 rounded-lg border border-accent-2/30 bg-accent-2/10 px-3 py-2 text-xs text-[#c4b5fd]">
-              <User className="mt-0.5 size-3.5 shrink-0" />
-              <span>
-                Digite um valor fixo em cada variável OU escreva{" "}
-                <strong>{"{nome}"}</strong> para preencher com o nome do lead
-                automaticamente no disparo.
-              </span>
+            <div className="space-y-2 rounded-lg border border-accent-2/30 bg-accent-2/10 px-3 py-2.5 text-xs text-[#c4b5fd]">
+              <div className="flex items-start gap-1.5">
+                <User className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  Em cada variável, digite um <strong>valor fixo</strong> OU
+                  clique num token abaixo para inserir um dado dinâmico do lead
+                  (preenchido automaticamente no disparo).
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 pl-5">
+                <span className="text-[11px] uppercase tracking-wide text-muted-2">
+                  Variáveis disponíveis:
+                </span>
+                {AVAILABLE_TOKENS.map((t) => (
+                  <button
+                    key={t.token}
+                    type="button"
+                    onClick={() => insertToken(t.token)}
+                    title={`Inserir ${t.token} (${t.label})`}
+                    className="inline-flex items-center gap-1 rounded-md border border-accent-2/40 bg-accent-2/15 px-2 py-1 font-mono text-[11px] text-fg transition hover:border-accent-2/70 hover:bg-accent-2/25 focus:outline-none focus:ring-1 focus:ring-accent-2/60"
+                  >
+                    <span>{t.token}</span>
+                    <span className="font-sans text-muted-2">{t.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -392,6 +433,7 @@ function CampaignFormModal({
                   </label>
                   <input
                     value={vars[idx] ?? ""}
+                    onFocus={() => setFocusedVar(idx)}
                     onChange={(e) =>
                       setVars((prev) => {
                         const next = [...prev];
