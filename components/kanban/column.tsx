@@ -45,7 +45,8 @@ export function Column({
       <div
         ref={setNodeRef}
         className={[
-          "flex min-h-24 flex-1 flex-col gap-2 rounded-b-xl px-2.5 pb-3 pt-1 transition-colors",
+          "flex min-h-24 flex-1 flex-col gap-2 overflow-y-auto rounded-b-xl px-2.5 pb-3 pt-1 transition-colors",
+          "max-h-[calc(100dvh-13rem)]",
           isOver ? "bg-accent/5" : "",
         ].join(" ")}
       >

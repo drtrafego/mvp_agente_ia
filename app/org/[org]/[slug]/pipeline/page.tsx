@@ -37,7 +37,7 @@ export default async function PipelinePage({
     const data = await getBoard(slug);
     const totalLeads = data.leads.length;
     return (
-      <PageWrapper>
+      <PageWrapper wide>
         <PageHeader
           title="CRM"
           subtitle={`${formatNumber(totalLeads)} leads no quadro`}
