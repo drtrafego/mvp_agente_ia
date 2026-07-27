@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { Info, Sparkles } from "lucide-react";
+import { Info, Sparkles, KanbanSquare } from "lucide-react";
 import { getLeads, STAGES, type Stage, type Lead } from "@/lib/queries";
+import { getBoard, hasKanban } from "@/lib/kanban";
 import { assertAgentAccess } from "@/lib/access";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { Badge } from "@/components/ui";
+import { KanbanBoardView } from "@/components/kanban/board";
 import { ChannelIcon } from "@/components/channel-icon";
 import { channelLabel, formatNumber, timeAgo } from "@/lib/utils";
 
@@ -28,6 +30,29 @@ export default async function PipelinePage({
   const { org, slug } = await params;
   await assertAgentAccess(slug);
   const basePath = `/org/${org}/${slug}`;
+
+  // CRM Kanban (colunas persistentes + arraste) para agentes provisionados.
+  // Os demais continuam vendo o pipeline por etapas inferidas.
+  if (await hasKanban(slug)) {
+    const data = await getBoard(slug);
+    const totalLeads = data.leads.length;
+    return (
+      <PageWrapper>
+        <PageHeader
+          title="CRM"
+          subtitle={`${formatNumber(totalLeads)} leads no quadro`}
+          action={
+            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted">
+              <KanbanSquare className="size-3.5 text-accent" />
+              Arraste os cards entre as colunas
+            </div>
+          }
+        />
+        <KanbanBoardView slug={slug} board={data} />
+      </PageWrapper>
+    );
+  }
+
   const board = await getLeads(slug);
   const total = STAGES.reduce((s, st) => s + board[st].length, 0);
 
