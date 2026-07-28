@@ -123,6 +123,36 @@ export async function createLead(
   return { ok: true };
 }
 
+/** Edita os dados de um lead (nome, telefone, email, origem, observações). */
+export async function updateLead(
+  slug: string,
+  id: string,
+  data: {
+    name: string;
+    phone?: string;
+    email?: string;
+    campaignSource?: string;
+    notes?: string;
+  },
+): Promise<{ ok: true }> {
+  const schema = await schemaFor(slug);
+  const name = data.name.trim() || "Sem nome";
+  await sql.unsafe(
+    `update "${schema}".crm_leads
+        set name = $1, phone = $2, email = $3, campaign_source = $4, notes = $5
+      where id = $6`,
+    [
+      name,
+      data.phone?.trim() || null,
+      data.email?.trim() || null,
+      data.campaignSource?.trim() || null,
+      data.notes?.trim() || null,
+      id,
+    ],
+  );
+  return { ok: true };
+}
+
 /** Apaga um lead. */
 export async function deleteLead(
   slug: string,

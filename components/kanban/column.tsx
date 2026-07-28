@@ -55,7 +55,7 @@ export function Column({
           strategy={verticalListSortingStrategy}
         >
           {leads.map((lead) => (
-            <LeadCard key={lead.id} lead={lead} />
+            <LeadCard key={lead.id} lead={lead} slug={slug} />
           ))}
         </SortableContext>
         {leads.length === 0 ? (
