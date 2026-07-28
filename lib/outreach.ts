@@ -4,7 +4,7 @@ import { sql } from "./db";
 import type { Agent } from "./agents";
 import { getMetaConfig, getMetaToken } from "./meta-config";
 import { sendWhatsappTemplate } from "./clients/meta-whatsapp";
-import { fillNameToken } from "./utils";
+import { fillTokens } from "./utils";
 
 /**
  * Caminho INTERNO do disparo em massa.
@@ -117,9 +117,9 @@ export async function sendTemplateToLeadsInternal(
         continue;
       }
 
-      // Monta bodyParams por lead: cada posição com o token {nome} vira o nome
-      // deste lead; valores fixos passam intactos. Sem variáveis → [].
-      const bodyParams = templateParams.map((p) => fillNameToken(p, name));
+      // Monta bodyParams por lead: os tokens ({nome}/{primeiro_nome}/{telefone})
+      // viram os dados deste lead; valores fixos passam intactos. Sem variáveis → [].
+      const bodyParams = templateParams.map((p) => fillTokens(p, { name, phone }));
 
       const r = await sendWhatsappTemplate(
         phone,

@@ -32,6 +32,8 @@ import { formatDateTime, expandCampaignVars } from "@/lib/utils";
 // preenchimento do disparo.
 const AVAILABLE_TOKENS: { token: string; label: string }[] = [
   { token: "{nome}", label: "nome do lead" },
+  { token: "{primeiro_nome}", label: "só o primeiro nome" },
+  { token: "{telefone}", label: "telefone do lead" },
 ];
 
 // Preview: substitui {{n}} pelo valor da variável n e, dentro dele, o token

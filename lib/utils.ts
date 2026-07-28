@@ -146,6 +146,27 @@ export function fillNameToken(value: string, leadName: string): string {
 }
 
 /**
+ * Troca os tokens dinâmicos de uma variável pelos dados do lead na hora do
+ * disparo. Tokens suportados (aceitam {x} e {{x}}, case-insensitive):
+ *   {nome}          -> nome completo do lead
+ *   {primeiro_nome} -> só o primeiro nome
+ *   {telefone}      -> telefone do lead (só dígitos)
+ * O que não for token fica intacto (valor fixo).
+ */
+export function fillTokens(
+  value: string,
+  ctx: { name?: string; phone?: string },
+): string {
+  const name = (ctx.name ?? "").trim();
+  const first = name.split(/\s+/)[0] ?? "";
+  const phone = (ctx.phone ?? "").replace(/\D/g, "");
+  return (value ?? "")
+    .replace(/\{\{?\s*primeiro[_\s]?nome\s*\}?\}/gi, first || name)
+    .replace(/\{\{?\s*telefone\s*\}?\}/gi, phone)
+    .replace(/\{\{?\s*nome\s*\}?\}/gi, name || "tudo bem");
+}
+
+/**
  * Reconstrói a lista posicional completa {{1}}..{{N}} das variáveis salvas.
  * Campanhas novas guardam as N posições; as antigas guardavam só {{2}}..{{N}}
  * (o {{1}} era sempre o nome). Quando faltam posições, o {{1}} vira o token
