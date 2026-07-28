@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/shadcn/button";
 import {
@@ -30,6 +31,7 @@ function SubmitButton() {
 import { CRMActionOverrides } from "@/types/crm-actions";
 
 export function NewLeadDialog({ orgId, overrides }: { orgId: string; overrides?: CRMActionOverrides }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -42,6 +44,7 @@ export function NewLeadDialog({ orgId, overrides }: { orgId: string; overrides?:
     try {
       await createLeadAction(formData, orgId);
       setOpen(false);
+      router.refresh();
     } finally {
       setIsLoading(false);
     }

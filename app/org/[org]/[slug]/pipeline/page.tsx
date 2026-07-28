@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Info, Sparkles, KanbanSquare } from "lucide-react";
+import { Info, Sparkles } from "lucide-react";
 import { getLeads, STAGES, type Stage, type Lead } from "@/lib/queries";
 import { getBoard, hasKanban } from "@/lib/kanban";
 import { assertAgentAccess } from "@/lib/access";
@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { Badge } from "@/components/ui";
 import { Board } from "@/components/kanban/board";
+import { NewLeadDialog } from "@/components/kanban/new-lead-dialog";
 import { ChannelIcon } from "@/components/channel-icon";
 import { channelLabel, formatNumber, timeAgo } from "@/lib/utils";
 
@@ -41,12 +42,7 @@ export default async function PipelinePage({
         <PageHeader
           title="CRM"
           subtitle={`${formatNumber(totalLeads)} leads no quadro`}
-          action={
-            <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted">
-              <KanbanSquare className="size-3.5 text-accent" />
-              Arraste os cards entre as colunas
-            </div>
-          }
+          action={<NewLeadDialog orgId={slug} />}
         />
         <Board columns={data.columns} initialLeads={data.leads} orgId={slug} />
       </PageWrapper>
