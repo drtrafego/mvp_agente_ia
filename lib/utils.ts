@@ -5,6 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Link de conversa no WhatsApp a partir de um telefone (só dígitos). Usado
+// pelos cards/modal do CRM. Vazio quando o número é curto/ausente.
+export function getWhatsAppLink(phone: string | null | undefined): string {
+  const num = (phone ?? "").replace(/\D/g, "");
+  return num.length >= 8 ? `https://wa.me/${num}` : "";
+}
+
 export function formatUSD(value: number | string | null | undefined): string {
   const n = Number(value ?? 0);
   return new Intl.NumberFormat("en-US", {

@@ -1,68 +1,96 @@
 import { sql } from "./db";
 import { safeSchema } from "./agents";
+import type { Lead, Column } from "@/server/db/schema";
 
-// CRM Kanban do agente. As tabelas vivem no SCHEMA do proprio agente
+// CRM Kanban do agente. As tabelas vivem no SCHEMA do próprio agente
 // ("<schema>".crm_columns / crm_leads), isoladas por cliente (nunca misturar).
+// Devolve os dados no formato que os componentes (portados do crm-unico) leem.
 
-export type KanbanColumn = {
-  id: string;
-  title: string;
-  order: number;
-  color: string | null;
-};
-
-export type KanbanLead = {
-  id: string;
-  columnId: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  notes: string | null;
-  campaignSource: string | null;
-  position: number;
-  createdVia: string | null;
-  firstContactAt: string | null;
-  createdAt: string;
-};
+export type { Lead, Column } from "@/server/db/schema";
 
 export type KanbanBoard = {
-  columns: KanbanColumn[];
-  leads: KanbanLead[];
+  columns: Column[];
+  leads: Lead[];
 };
 
-// Le o board inteiro do agente. Se o agente ainda nao tem as tabelas do CRM
-// (schema sem crm_columns), devolve board vazio em vez de estourar.
 export async function getBoard(slug: string): Promise<KanbanBoard> {
   const schema = await safeSchema(slug);
   try {
-    const columns = await sql.unsafe<KanbanColumn[]>(
+    const cols = await sql.unsafe<
+      { id: string; title: string; order: number; color: string | null }[]
+    >(
       `select id, title, "order", color
          from "${schema}".crm_columns
         order by "order" asc, title asc`,
     );
-    const leads = await sql.unsafe<KanbanLead[]>(
-      `select id,
-              column_id      as "columnId",
-              name,
-              phone,
-              email,
-              notes,
-              campaign_source as "campaignSource",
-              position,
-              created_via    as "createdVia",
-              first_contact_at as "firstContactAt",
-              created_at     as "createdAt"
+    const rows = await sql.unsafe<
+      {
+        id: string;
+        name: string;
+        company: string | null;
+        email: string | null;
+        phone: string | null;
+        notes: string | null;
+        campaign_source: string | null;
+        value: string | null;
+        column_id: string | null;
+        position: number;
+        status: string | null;
+        created_via: string | null;
+        follow_up_date: string | null;
+        follow_up_note: string | null;
+        first_contact_at: string | null;
+        created_at: string;
+      }[]
+    >(
+      `select id, name, company, email, phone, notes, campaign_source, value,
+              column_id, position, status, created_via,
+              follow_up_date, follow_up_note, first_contact_at, created_at
          from "${schema}".crm_leads
         order by column_id, position asc, created_at desc`,
     );
+
+    const columns: Column[] = cols.map((c) => ({
+      id: c.id,
+      title: c.title,
+      order: c.order,
+      organizationId: slug,
+      color: c.color,
+    }));
+
+    const leads: Lead[] = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      company: r.company,
+      email: r.email,
+      whatsapp: r.phone,
+      campaignSource: r.campaign_source,
+      status: r.status ?? "active",
+      columnId: r.column_id,
+      position: r.position,
+      organizationId: slug,
+      notes: r.notes,
+      value: r.value,
+      followUpDate: r.follow_up_date,
+      followUpNote: r.follow_up_note,
+      firstContactAt: r.first_contact_at,
+      createdAt: r.created_at,
+      utmSource: null,
+      utmMedium: null,
+      utmCampaign: null,
+      utmTerm: null,
+      utmContent: null,
+      pagePath: null,
+      formData: null,
+      createdVia: r.created_via,
+    }));
+
     return { columns, leads };
   } catch {
-    // Agente sem CRM provisionado ainda.
     return { columns: [], leads: [] };
   }
 }
 
-// Confere se o agente tem o CRM Kanban provisionado (tabela existe e ha colunas).
 export async function hasKanban(slug: string): Promise<boolean> {
   const schema = await safeSchema(slug);
   try {

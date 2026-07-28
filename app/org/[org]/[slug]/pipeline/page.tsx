@@ -6,7 +6,7 @@ import { assertAgentAccess } from "@/lib/access";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { Badge } from "@/components/ui";
-import { KanbanBoardView } from "@/components/kanban/board";
+import { Board } from "@/components/kanban/board";
 import { ChannelIcon } from "@/components/channel-icon";
 import { channelLabel, formatNumber, timeAgo } from "@/lib/utils";
 
@@ -48,7 +48,7 @@ export default async function PipelinePage({
             </div>
           }
         />
-        <KanbanBoardView slug={slug} board={data} />
+        <Board columns={data.columns} initialLeads={data.leads} orgId={slug} />
       </PageWrapper>
     );
   }
