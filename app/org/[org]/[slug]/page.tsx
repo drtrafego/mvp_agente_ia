@@ -18,7 +18,8 @@ import {
   XCircle,
   ChevronRight,
 } from "lucide-react";
-import { assertAgentAccess } from "@/lib/access";
+import { assertAgentAccess, getSessionEmail } from "@/lib/access";
+import { isSuperAdmin } from "@/lib/admin";
 import { getDashboard, type DashboardData, type Period } from "@/lib/queries";
 import { PageWrapper } from "@/components/page-wrapper";
 import { KpiCard } from "@/components/kpi";
@@ -65,6 +66,8 @@ export default async function OverviewPage({
 
   const d = await getDashboard(slug, period);
   const todayStr = new Date().toISOString().slice(0, 10);
+  // Custo de IA é informação do dono (super admin). Cliente não vê.
+  const canSeeCost = isSuperAdmin(await getSessionEmail());
 
   return (
     <PageWrapper>
@@ -81,7 +84,7 @@ export default async function OverviewPage({
       </div>
 
       <div className="space-y-5">
-        <KpiRow d={d} />
+        <KpiRow d={d} canSeeCost={canSeeCost} />
         <FunnelSection d={d} />
         <TimelineSection d={d} todayStr={todayStr} />
         {d.sourceKind === "form" ? (
@@ -95,8 +98,8 @@ export default async function OverviewPage({
         ) : d.sourceKind === "outreach" ? (
           <OutreachChannelSection d={d} />
         ) : null}
-        <BotHealthSection d={d} />
-        <InsightsSection d={d} />
+        <BotHealthSection d={d} canSeeCost={canSeeCost} />
+        <InsightsSection d={d} canSeeCost={canSeeCost} />
         <RecentSection basePath={basePath} rows={d.recent} />
       </div>
     </PageWrapper>
@@ -126,7 +129,7 @@ function PeriodTabs({ basePath, period }: { basePath: string; period: Period }) 
 }
 
 /* ---- 1. KPIs ---- */
-function KpiRow({ d }: { d: DashboardData }) {
+function KpiRow({ d, canSeeCost }: { d: DashboardData; canSeeCost: boolean }) {
   const taxaCur =
     d.leads.current > 0 ? (d.conversaram.current / d.leads.current) * 100 : 0;
   const taxaPrev =
@@ -170,15 +173,17 @@ function KpiRow({ d }: { d: DashboardData }) {
         tone="success"
         hint="com mensagem recente"
       />
-      <KpiCard
-        label="Custo de IA"
-        value={formatBRL(d.custoUsd.current)}
-        icon={<DollarSign className="size-4" />}
-        tone="accent"
-        delta={pctDelta(d.custoUsd.current, d.custoUsd.previous)}
-        deltaInvert
-        hint={`${formatBRL(custoPorConversa)} / conversa`}
-      />
+      {canSeeCost ? (
+        <KpiCard
+          label="Custo de IA"
+          value={formatBRL(d.custoUsd.current)}
+          icon={<DollarSign className="size-4" />}
+          tone="accent"
+          delta={pctDelta(d.custoUsd.current, d.custoUsd.previous)}
+          deltaInvert
+          hint={`${formatBRL(custoPorConversa)} / conversa`}
+        />
+      ) : null}
       <KpiCard
         label="CPL"
         value="—"
@@ -476,7 +481,13 @@ function OutreachChannelSection({ d }: { d: DashboardData }) {
 }
 
 /* ---- 6. Saúde do bot ---- */
-function BotHealthSection({ d }: { d: DashboardData }) {
+function BotHealthSection({
+  d,
+  canSeeCost,
+}: {
+  d: DashboardData;
+  canSeeCost: boolean;
+}) {
   return (
     <Card glass className="p-5">
       <SectionHead
@@ -495,15 +506,17 @@ function BotHealthSection({ d }: { d: DashboardData }) {
           label="Msgs / conversa"
           value={d.bot.avgMsgs ? d.bot.avgMsgs.toFixed(1) : "0"}
         />
-        <div className="rounded-xl border border-border bg-surface-2/40 p-3">
-          <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-2">
-            Custo de IA / dia
+        {canSeeCost ? (
+          <div className="rounded-xl border border-border bg-surface-2/40 p-3">
+            <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-2">
+              Custo de IA / dia
+            </div>
+            <div className="tnum text-sm font-semibold">
+              {formatBRL(d.custoUsd.current)}
+            </div>
+            <CostSparkline data={d.timeline} />
           </div>
-          <div className="tnum text-sm font-semibold">
-            {formatBRL(d.custoUsd.current)}
-          </div>
-          <CostSparkline data={d.timeline} />
-        </div>
+        ) : null}
         <div className="rounded-xl border border-border bg-surface-2/40 p-3">
           <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-2">
             Canais
@@ -533,8 +546,14 @@ function BotHealthSection({ d }: { d: DashboardData }) {
 }
 
 /* ---- 7. Insights ---- */
-function InsightsSection({ d }: { d: DashboardData }) {
-  const insights = buildInsights(d);
+function InsightsSection({
+  d,
+  canSeeCost,
+}: {
+  d: DashboardData;
+  canSeeCost: boolean;
+}) {
+  const insights = buildInsights(d, canSeeCost);
   if (!insights.length) return null;
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -698,7 +717,7 @@ function formatDuration(sec: number | null): string {
 
 type Insight = { kind: "good" | "warn" | "bad"; text: string };
 
-function buildInsights(d: DashboardData): Insight[] {
+function buildInsights(d: DashboardData, canSeeCost: boolean): Insight[] {
   const out: Insight[] = [];
   const leadsDelta = pctDelta(d.leads.current, d.leads.previous);
   const convDelta = pctDelta(d.conversas.current, d.conversas.previous);
@@ -736,6 +755,7 @@ function buildInsights(d: DashboardData): Insight[] {
   }
 
   if (
+    canSeeCost &&
     custoDelta !== null &&
     custoDelta >= 15 &&
     (convDelta === null || convDelta <= 0)

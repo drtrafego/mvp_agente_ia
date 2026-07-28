@@ -20,7 +20,8 @@ import {
   type PanelPayload,
 } from "@/components/conversas-board";
 import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
-import { assertAgentAccess } from "@/lib/access";
+import { assertAgentAccess, getSessionEmail } from "@/lib/access";
+import { isSuperAdmin } from "@/lib/admin";
 import { getMetaConfig } from "@/lib/meta-config";
 import { cn, formatNumber } from "@/lib/utils";
 
@@ -43,6 +44,8 @@ export default async function ConversasPage({
   const { c, o, d, ch: chParam, f: fParam } = await searchParams;
   // Gate de acesso antes de qualquer consulta desta tela.
   const agent = await assertAgentAccess(slug);
+  // Custo de IA por conversa: só o dono (super admin) vê.
+  const canSeeCost = isSuperAdmin(await getSessionEmail());
   const basePath = `/org/${org}/${slug}`;
   const ch: ConvChannel = chParam === "email" ? "email" : "whatsapp";
   const filter: ConvFilter =
@@ -160,6 +163,7 @@ export default async function ConversasPage({
         items={items}
         initialKey={initialKey}
         initialPayload={initialPayload}
+        canSeeCost={canSeeCost}
       />
     </div>
   );

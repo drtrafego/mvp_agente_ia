@@ -80,6 +80,7 @@ export function ConversasBoard({
   items,
   initialKey,
   initialPayload,
+  canSeeCost = false,
 }: {
   slug: string;
   basePath: string;
@@ -87,6 +88,7 @@ export function ConversasBoard({
   items: BoardItem[];
   initialKey: string | null;
   initialPayload: PanelPayload | null;
+  canSeeCost?: boolean;
 }) {
   const [active, setActive] = React.useState<string | null>(initialKey);
   const [cache, setCache] = React.useState<Record<string, PanelPayload>>(() =>
@@ -258,6 +260,7 @@ export function ConversasBoard({
                 isPaused={payload.isPaused}
                 sendEnabled={payload.sendEnabled}
                 templates={payload.templates}
+                canSeeCost={canSeeCost}
               />
             </div>
           ) : payload.kind === "outreach" ? (

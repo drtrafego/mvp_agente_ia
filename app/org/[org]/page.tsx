@@ -9,7 +9,8 @@ import {
   MessagesSquare,
   Activity,
 } from "lucide-react";
-import { assertOrgAccess, getOrgAgents } from "@/lib/access";
+import { assertOrgAccess, getOrgAgents, getSessionEmail } from "@/lib/access";
+import { isSuperAdmin } from "@/lib/admin";
 import { PortalLink } from "@/components/portal-link";
 import { getPortalStats } from "@/lib/queries";
 import { formatUSD, formatNumber, timeAgo } from "@/lib/utils";
@@ -51,6 +52,8 @@ export default async function OrgPage({
   const organization = await assertOrgAccess(org);
   const agents = await getOrgAgents(organization.id);
   const stats = await getPortalStats(agents);
+  // Custo de IA é do dono (super admin); cliente não vê.
+  const canSeeCost = isSuperAdmin(await getSessionEmail());
 
   const totals = Object.values(stats).reduce(
     (acc, s) => {
@@ -98,7 +101,9 @@ export default async function OrgPage({
             value={formatNumber(totals.conversations)}
           />
           <PortalTotal label="Mensagens" value={formatNumber(totals.messages)} />
-          <PortalTotal label="Custo total" value={formatUSD(totals.cost)} />
+          {canSeeCost ? (
+            <PortalTotal label="Custo total" value={formatUSD(totals.cost)} />
+          ) : null}
         </div>
       </header>
 
@@ -160,11 +165,13 @@ export default async function OrgPage({
                   label="Mensagens"
                   value={formatNumber(s.messages)}
                 />
-                <Metric
-                  icon={<DollarSign className="size-3.5" />}
-                  label="Custo"
-                  value={formatUSD(s.cost)}
-                />
+                {canSeeCost ? (
+                  <Metric
+                    icon={<DollarSign className="size-3.5" />}
+                    label="Custo"
+                    value={formatUSD(s.cost)}
+                  />
+                ) : null}
               </div>
 
               <div className="relative mt-4 flex items-center gap-2 text-xs text-muted">

@@ -16,6 +16,7 @@ export function ChatView({
   isPaused,
   sendEnabled,
   templates,
+  canSeeCost = false,
 }: {
   slug: string;
   /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
@@ -25,6 +26,8 @@ export function ChatView({
   isPaused: boolean;
   sendEnabled: boolean;
   templates: ApprovedTemplate[];
+  /** Custo de IA só aparece para o super admin (dono). */
+  canSeeCost?: boolean;
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
@@ -52,12 +55,14 @@ export function ChatView({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <SyncNowButton slug={slug} />
-          <div className="hidden items-center gap-1 rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs text-muted sm:flex">
-            <DollarSign className="size-3.5 text-accent" />
-            <span className="tnum font-medium text-fg">
-              {formatUSD(conversation.cost_usd)}
-            </span>
-          </div>
+          {canSeeCost ? (
+            <div className="hidden items-center gap-1 rounded-lg bg-surface-2 px-2.5 py-1.5 text-xs text-muted sm:flex">
+              <DollarSign className="size-3.5 text-accent" />
+              <span className="tnum font-medium text-fg">
+                {formatUSD(conversation.cost_usd)}
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
 
