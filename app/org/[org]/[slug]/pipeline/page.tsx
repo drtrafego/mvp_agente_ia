@@ -37,15 +37,23 @@ export default async function PipelinePage({
   if (await hasKanban(slug)) {
     const data = await getBoard(slug);
     const totalLeads = data.leads.length;
+    // Layout de ALTURA CHEIA: o Board usa h-full e precisa de um pai com altura
+    // definida, senão o arraste/scroll das colunas fica errado (card "pulando"
+    // de coluna). Descontamos a topbar mobile (3.5rem); no desktop a main já
+    // começa no topo (lg:pt-0), então usa a viewport inteira.
     return (
-      <PageWrapper wide>
-        <PageHeader
-          title="CRM"
-          subtitle={`${formatNumber(totalLeads)} leads no quadro`}
-          action={<NewLeadDialog orgId={slug} />}
-        />
-        <Board columns={data.columns} initialLeads={data.leads} orgId={slug} />
-      </PageWrapper>
+      <div className="flex h-[calc(100dvh-3.5rem)] w-full flex-col px-4 pt-4 sm:px-6 lg:h-dvh lg:pt-6">
+        <div className="mb-3 shrink-0">
+          <PageHeader
+            title="CRM"
+            subtitle={`${formatNumber(totalLeads)} leads no quadro`}
+            action={<NewLeadDialog orgId={slug} />}
+          />
+        </div>
+        <div className="min-h-0 flex-1 pb-4">
+          <Board columns={data.columns} initialLeads={data.leads} orgId={slug} />
+        </div>
+      </div>
     );
   }
 
