@@ -3,6 +3,9 @@ import { cookies, headers } from "next/headers";
 import { stackServerApp, stackAuthConfigured } from "@/lib/stack";
 import { getUserOrgs } from "@/lib/access";
 import { isSuperAdmin } from "@/lib/admin";
+import { logDiag } from "@/lib/diag";
+
+const DIAG_VERSION = "diag-3";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +15,15 @@ export const dynamic = "force-dynamic";
  * Não recebe nem ecoa dado de terceiro: só a própria sessão do requisitante.
  * Remover depois de resolver o 404 da Patricia.
  */
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
+  // ?probe=1 grava uma linha na tabela de diagnóstico. Serve para EU confirmar,
+  // com a minha própria requisição, que a gravação funciona em produção.
+  let wroteProbe = false;
+  if (req.nextUrl.searchParams.has("probe")) {
+    await logDiag("probe", { version: DIAG_VERSION, ua: req.headers.get("user-agent") });
+    wroteProbe = true;
+  }
+
   const jar = await cookies();
   const stackCookies = jar
     .getAll()
@@ -50,6 +61,8 @@ export async function GET(_req: NextRequest) {
   const identityHeader = (await headers()).get("x-stack-user-email");
 
   return NextResponse.json({
+    version: DIAG_VERSION,
+    wroteProbe,
     stackAuthConfigured,
     stackCookiesPresent: stackCookies,
     identityHeader,
