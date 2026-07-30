@@ -19,7 +19,9 @@ const CSP_FRAME_ANCESTORS =
  */
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname.startsWith("/handler") || pathname.startsWith("/api/dispatch")
+    pathname.startsWith("/handler") ||
+    pathname.startsWith("/api/dispatch") ||
+    pathname.startsWith("/api/whoami")
   );
 }
 
