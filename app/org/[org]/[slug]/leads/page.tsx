@@ -33,10 +33,10 @@ export default async function LeadsPage({
         title="Leads"
         subtitle={
           leads.length
-            ? `${formatNumber(leads.length)} leads (formulário + anúncio) · ${formatNumber(
+            ? `${formatNumber(leads.length)} leads · ${formatNumber(
                 converted,
               )} já conversaram`
-            : "Leads capturados por formulário e anúncio (Click-to-WhatsApp)"
+            : "Contatos que chegaram ao agente (formulário, anúncio ou WhatsApp)"
         }
       />
 
@@ -65,8 +65,8 @@ function EmptyLeads() {
         </span>
         <p className="font-medium">Nenhum lead ainda</p>
         <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
-          Assim que os formulários Meta capturarem contatos, eles aparecem aqui
-          com o status de atendimento.
+          Assim que alguém entrar em contato com o agente, aparece aqui com o
+          status de atendimento.
         </p>
       </div>
     </div>

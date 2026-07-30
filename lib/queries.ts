@@ -652,8 +652,6 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
   // Só agentes com fonte de FORMULÁRIO têm leads aqui, ESCOPADOS pela página
   // do agente (nunca misturar clientes). Outros (outreach/none) = sem leads de form.
   const ls = getLeadSource(await getAgent(slug));
-  if (ls.leadSource !== "form") return [];
-  const pageId = ls.pageId;
   try {
     const outreach = await getOutreachMap(slug);
     const withOutreach = (
@@ -667,6 +665,69 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
         enviadoEm: o?.sentAt ?? null,
       };
     };
+
+    // ---- Bots SEM formulário Meta (WhatsApp/site) ----
+    // Os "leads" são as pessoas que mandaram a 1ª mensagem, lidas do CRM do
+    // próprio agente (crm_leads), ESCOPADO pelo schema do agente (nunca misturar
+    // clientes). Junta a conversa (por telefone) pro link e marca disparo/template.
+    if (ls.leadSource !== "form") {
+      const waRows = await sql.unsafe<
+        {
+          id: string;
+          name: string | null;
+          phone: string | null;
+          phone_norm: string | null;
+          email: string | null;
+          campaign_source: string | null;
+          created_time: string | null;
+          conv_session_id: string | null;
+        }[]
+      >(
+        `select l.id, l.name, l.phone,
+                regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') as phone_norm,
+                l.email, l.campaign_source,
+                coalesce(l.first_contact_at, l.created_at) as created_time,
+                conv.session_id as conv_session_id
+         from "${schema}".crm_leads l
+         left join lateral (
+           select c.session_id
+           from "${schema}".conversations c
+           where l.phone is not null and l.phone <> '' and (
+             regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g')
+               = regexp_replace(l.phone, '\\D', '', 'g')
+             or (
+               length(regexp_replace(l.phone, '\\D', '', 'g')) >= 8
+               and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                   = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
+             )
+           )
+           order by coalesce(c.started_at, c.ended_at) desc nulls last
+           limit 1
+         ) conv on true
+         order by coalesce(l.first_contact_at, l.created_at) desc nulls last`,
+      );
+      return waRows.map((r) =>
+        withOutreach({
+          lead_id: r.id ?? null,
+          created_time: r.created_time,
+          page_name: null,
+          form_name: null,
+          campaign_name: r.campaign_source,
+          adset_name: null,
+          ad_name: null,
+          platform: "whatsapp",
+          full_name: r.name,
+          phone: r.phone,
+          phone_norm: r.phone_norm,
+          email: r.email,
+          field_data: null,
+          conversou: true,
+          session_id: r.conv_session_id,
+        }),
+      );
+    }
+
+    const pageId = ls.pageId;
 
     // ---- Leads de formulário (meta_leads, page-scoped) ----
     const formRows = await sql.unsafe<
