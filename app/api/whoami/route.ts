@@ -4,8 +4,47 @@ import { stackServerApp, stackAuthConfigured } from "@/lib/stack";
 import { getUserOrgs } from "@/lib/access";
 import { isSuperAdmin } from "@/lib/admin";
 import { logDiag } from "@/lib/diag";
+import { sql } from "@/lib/db";
 
-const DIAG_VERSION = "diag-3";
+const DIAG_VERSION = "diag-4";
+
+/**
+ * Introspecção do banco que a PRODUÇÃO realmente usa (process.env.DATABASE_URL
+ * do app de agentes), para comparar com o banco onde o portal grava os membros.
+ * Só o host (sem senha) e contagens, nada sensível.
+ */
+async function dbIntrospect() {
+  const raw = process.env.DATABASE_URL || "";
+  const host = raw.match(/@([^/]+)/)?.[1] ?? null;
+  try {
+    const [meta] = await sql.unsafe<{ db: string; usr: string }[]>(
+      `select current_database() as db, current_user as usr`,
+    );
+    const org = await sql.unsafe<{ id: string }[]>(
+      `select id from public.organizations where slug = 'dr-lucas' limit 1`,
+    );
+    let patyIsMember = false;
+    let memberCount = 0;
+    if (org[0]) {
+      const mem = await sql.unsafe<{ email: string }[]>(
+        `select email from public.members where organization_id = $1`,
+        [org[0].id],
+      );
+      memberCount = mem.length;
+      patyIsMember = mem.some((m) => m.email === "patyabreusilva83@gmail.com");
+    }
+    return {
+      host,
+      currentDb: meta?.db ?? null,
+      currentUser: meta?.usr ?? null,
+      drLucasOrgExists: !!org[0],
+      drLucasMemberCount: memberCount,
+      patyIsMember,
+    };
+  } catch (e) {
+    return { host, error: String(e instanceof Error ? e.message : e) };
+  }
+}
 
 export const dynamic = "force-dynamic";
 
@@ -60,8 +99,11 @@ export async function GET(req: NextRequest) {
   // Header que o middleware repassa (ou apaga, se veio forjado de fora).
   const identityHeader = (await headers()).get("x-stack-user-email");
 
+  const db = await dbIntrospect();
+
   return NextResponse.json({
     version: DIAG_VERSION,
+    db,
     wroteProbe,
     stackAuthConfigured,
     stackCookiesPresent: stackCookies,
