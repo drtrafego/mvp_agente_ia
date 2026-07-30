@@ -3,6 +3,7 @@ import { cache } from "react";
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import { sql } from "./db";
+import { logDiag } from "./diag";
 import { stackServerApp } from "./stack";
 import { isSuperAdmin } from "./admin";
 import { getAgent, listAgents, listAgentsByOrg, type Agent } from "./agents";
@@ -32,28 +33,48 @@ export type Organization = {
  * mesma renderização (layout mais página, ou várias server actions).
  */
 export const getSessionEmail = cache(async (): Promise<string | null> => {
+  let headerEmail: string | null = null;
+  let getUserEmail: string | null = null;
+  let rawPrimaryEmail: string | null = null;
+  let userId: string | null = null;
+  let getUserErr: string | null = null;
+  let cookieNames: string[] = [];
+
   // 1. Identidade já validada pelo middleware e repassada em header interno.
-  //    É a fonte confiável: dentro do iframe o getUser em Server Component às
-  //    vezes não relê o cookie que o middleware acabou de aceitar, e sem isto
-  //    a página caía em 404 mesmo com sessão válida. O middleware apaga o
-  //    header de entrada e só o grava após confirmar a sessão, então o valor
-  //    aqui nunca vem forjado pelo cliente.
   try {
-    const fromHeader = (await headers()).get("x-stack-user-email")?.trim().toLowerCase();
-    if (fromHeader) return fromHeader;
+    const h = await headers();
+    headerEmail = h.get("x-stack-user-email")?.trim().toLowerCase() || null;
+    cookieNames = (h.get("cookie") || "")
+      .split(";")
+      .map((c) => c.trim().split("=")[0])
+      .filter((n) => n.toLowerCase().includes("stack"));
   } catch {
-    // headers() indisponível fora de request: cai para o getUser abaixo.
+    // headers() indisponível fora de request.
   }
 
-  // 2. Reserva: resolve direto no Stack (contextos sem o middleware na frente).
-  if (!stackServerApp) return null;
-  try {
-    const user = await stackServerApp.getUser();
-    const email = user?.primaryEmail?.trim().toLowerCase();
-    return email || null;
-  } catch {
-    return null;
+  // 2. Reserva: resolve direto no Stack.
+  if (!headerEmail && stackServerApp) {
+    try {
+      const user = await stackServerApp.getUser();
+      rawPrimaryEmail = user?.primaryEmail ?? null;
+      userId = user?.id ?? null;
+      getUserEmail = user?.primaryEmail?.trim().toLowerCase() || null;
+    } catch (e) {
+      getUserErr = String(e instanceof Error ? e.message : e);
+    }
   }
+
+  const email = headerEmail || getUserEmail;
+  await logDiag("getSessionEmail", {
+    headerEmail,
+    getUserEmail,
+    rawPrimaryEmail,
+    userId,
+    getUserErr,
+    cookieNames,
+    finalEmail: email,
+  });
+  return email;
 });
 
 /** Empresas do usuário. Superadmin recebe todas. */
@@ -124,14 +145,28 @@ async function isMember(
 /** Empresa da URL, já com acesso confirmado. Qualquer falha vira 404. */
 export async function assertOrgAccess(orgSlug: string): Promise<Organization> {
   const email = await getSessionEmail();
-  if (!email) notFound();
+  if (!email) {
+    await logDiag("assertOrgAccess", { orgSlug, decision: "404-no-email" });
+    notFound();
+  }
 
   const org = await getOrgBySlug(orgSlug);
-  if (!org) notFound();
+  if (!org) {
+    await logDiag("assertOrgAccess", { orgSlug, email, decision: "404-no-org" });
+    notFound();
+  }
 
   if (isSuperAdmin(email)) return org;
 
-  if (!(await isMember(org.id, email))) notFound();
+  const member = await isMember(org.id, email);
+  await logDiag("assertOrgAccess", {
+    orgSlug,
+    email,
+    orgId: org.id,
+    member,
+    decision: member ? "ok-member" : "404-not-member",
+  });
+  if (!member) notFound();
   return org;
 }
 
