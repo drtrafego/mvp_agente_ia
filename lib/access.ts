@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import { sql } from "./db";
 import { stackServerApp } from "./stack";
 import { isSuperAdmin } from "./admin";
@@ -31,6 +32,20 @@ export type Organization = {
  * mesma renderização (layout mais página, ou várias server actions).
  */
 export const getSessionEmail = cache(async (): Promise<string | null> => {
+  // 1. Identidade já validada pelo middleware e repassada em header interno.
+  //    É a fonte confiável: dentro do iframe o getUser em Server Component às
+  //    vezes não relê o cookie que o middleware acabou de aceitar, e sem isto
+  //    a página caía em 404 mesmo com sessão válida. O middleware apaga o
+  //    header de entrada e só o grava após confirmar a sessão, então o valor
+  //    aqui nunca vem forjado pelo cliente.
+  try {
+    const fromHeader = (await headers()).get("x-stack-user-email")?.trim().toLowerCase();
+    if (fromHeader) return fromHeader;
+  } catch {
+    // headers() indisponível fora de request: cai para o getUser abaixo.
+  }
+
+  // 2. Reserva: resolve direto no Stack (contextos sem o middleware na frente).
   if (!stackServerApp) return null;
   try {
     const user = await stackServerApp.getUser();

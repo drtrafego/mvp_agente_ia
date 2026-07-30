@@ -25,8 +25,23 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-function allow(): NextResponse {
-  const res = NextResponse.next();
+/**
+ * Header interno com o email JÁ validado pela sessão. A página confia nele em
+ * vez de resolver a sessão de novo (o getUser em Server Component dentro de
+ * iframe às vezes não relê o cookie que o middleware acabou de aceitar, e a
+ * página caía em 404 mesmo com o middleware tendo liberado).
+ *
+ * Segurança: o valor que vier DE FORA é sempre apagado antes de qualquer coisa,
+ * e só é escrito aqui, depois do getUser confirmar a sessão. Cliente não forja.
+ */
+const IDENTITY_HEADER = "x-stack-user-email";
+
+function allow(req: NextRequest, email?: string | null): NextResponse {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.delete(IDENTITY_HEADER);
+  if (email) requestHeaders.set(IDENTITY_HEADER, email);
+
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.headers.set("Content-Security-Policy", CSP_FRAME_ANCESTORS);
   return res;
 }
@@ -109,8 +124,8 @@ export async function middleware(req: NextRequest) {
   const ingested = ingestStackToken(req);
   if (ingested) return ingested;
 
-  // 2. Rotas de login passam livres.
-  if (isPublicPath(pathname)) return allow();
+  // 2. Rotas de login passam livres (sem identidade, header limpo).
+  if (isPublicPath(pathname)) return allow(req, null);
 
   // 3. Sessão Stack. O corte anti bot vem ANTES de tocar no Stack Auth.
   if (stackServerApp && hasStackSessionCookie(req)) {
@@ -118,7 +133,10 @@ export async function middleware(req: NextRequest) {
       const user = await stackServerApp.getUser({
         tokenStore: req,
       });
-      if (user) return allow();
+      if (user) {
+        const email = user.primaryEmail?.trim().toLowerCase() || null;
+        return allow(req, email);
+      }
     } catch (err) {
       console.error("Falha ao resolver a sessão Stack no middleware:", err);
     }

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { stackServerApp, stackAuthConfigured } from "@/lib/stack";
 import { getUserOrgs } from "@/lib/access";
 import { isSuperAdmin } from "@/lib/admin";
@@ -26,7 +26,9 @@ export async function GET(_req: NextRequest) {
 
   let email: string | null = null;
   let getUserError: string | null = null;
-  if (stackServerApp) {
+  // Corte anti bot: sem cookie de sessão, NÃO chama o Stack (protege a cota de
+  // usuários ativos, igual ao middleware).
+  if (stackServerApp && stackCookies.length > 0) {
     try {
       const user = await stackServerApp.getUser();
       email = user?.primaryEmail?.trim().toLowerCase() ?? null;
@@ -44,9 +46,13 @@ export async function GET(_req: NextRequest) {
     }
   }
 
+  // Header que o middleware repassa (ou apaga, se veio forjado de fora).
+  const identityHeader = (await headers()).get("x-stack-user-email");
+
   return NextResponse.json({
     stackAuthConfigured,
     stackCookiesPresent: stackCookies,
+    identityHeader,
     resolvedEmail: email,
     isSuperAdmin: isSuperAdmin(email),
     orgs,
