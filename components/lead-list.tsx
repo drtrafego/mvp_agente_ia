@@ -412,7 +412,7 @@ function ScheduleModal({
   onDone: () => void;
 }) {
   const [mode, setMode] = React.useState<"saved" | "avulso">(
-    campaigns.length > 0 ? "saved" : "avulso",
+    "avulso",
   );
   const [campaignId, setCampaignId] = React.useState(campaigns[0]?.id ?? "");
   const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
@@ -562,7 +562,7 @@ function ScheduleModal({
                       : "text-muted hover:text-fg"
                   }`}
                 >
-                  Avulso
+                  Escolher template
                 </button>
               </div>
             ) : null}
@@ -748,7 +748,7 @@ function CampaignModal({
   onDone: () => void;
 }) {
   const [mode, setMode] = React.useState<"saved" | "avulso">(
-    campaigns.length > 0 ? "saved" : "avulso",
+    "avulso",
   );
   const [campaignId, setCampaignId] = React.useState(campaigns[0]?.id ?? "");
   const [tplName, setTplName] = React.useState(templates[0]?.name ?? "");
@@ -874,7 +874,7 @@ function CampaignModal({
                         : "text-muted hover:text-fg"
                     }`}
                   >
-                    Avulso
+                    Escolher template
                   </button>
                 </div>
               ) : null}

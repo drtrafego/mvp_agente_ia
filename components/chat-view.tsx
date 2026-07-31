@@ -31,7 +31,7 @@ export function ChatView({
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
-      <div className="flex items-start gap-3 border-b border-border px-4 py-3.5">
+      <div className="flex items-start gap-3 border-b border-border px-3 py-3 sm:px-4 sm:py-3.5">
         <Link
           href={`${basePath}/conversas`}
           scroll={false}
@@ -66,7 +66,7 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+      <div className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3 sm:p-6">
         {messages.length === 0 ? (
           <p className="mt-8 text-center text-sm text-muted-2">
             Nenhuma mensagem registrada nesta conversa.
@@ -129,7 +129,7 @@ function Bubble({
         }`}
       >
         {text ? (
-          <p className="whitespace-pre-wrap break-words">{text}</p>
+          <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</p>
         ) : null}
         {media.map((m, i) => (
           <MediaBlock
@@ -169,7 +169,7 @@ function MediaBlock({
         controls
         preload="metadata"
         src={src}
-        className={`${wrap} w-full min-w-[220px] rounded-lg`}
+        className={`${wrap} w-full min-w-0 rounded-lg`}
       />
     );
   }
