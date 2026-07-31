@@ -141,21 +141,7 @@ export default async function ConversasPage({
   });
 
   return (
-    <div className="animate-fade-in flex h-[calc(100dvh-3.5rem)] flex-col gap-3 p-3 sm:p-4 lg:h-dvh">
-      <div className="flex shrink-0 items-baseline justify-between gap-3 px-1">
-        <h1 className="text-gradient text-lg font-semibold tracking-tight sm:text-xl">
-          Conversas
-        </h1>
-        <span className="text-xs text-muted">
-          {formatNumber(items.length)} nesta aba
-        </span>
-      </div>
-
-      <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <ChannelTabs basePath={basePath} ch={ch} filter={filter} />
-        <FilterChips basePath={basePath} ch={ch} filter={filter} />
-      </div>
-
+    <div className="animate-fade-in flex h-[calc(100dvh-3.5rem)] flex-col p-3 sm:p-4 lg:h-dvh">
       <ConversasBoard
         slug={slug}
         basePath={basePath}
@@ -164,6 +150,22 @@ export default async function ConversasPage({
         initialKey={initialKey}
         initialPayload={initialPayload}
         canSeeCost={canSeeCost}
+        header={
+          <div className="flex flex-col gap-3">
+            <div className="flex shrink-0 items-baseline justify-between gap-3 px-1">
+              <h1 className="text-gradient text-lg font-semibold tracking-tight sm:text-xl">
+                Conversas
+              </h1>
+              <span className="text-xs text-muted">
+                {formatNumber(items.length)} nesta aba
+              </span>
+            </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <ChannelTabs basePath={basePath} ch={ch} filter={filter} />
+              <FilterChips basePath={basePath} ch={ch} filter={filter} />
+            </div>
+          </div>
+        }
       />
     </div>
   );

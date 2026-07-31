@@ -83,6 +83,7 @@ export function ConversasBoard({
   initialKey,
   initialPayload,
   canSeeCost = false,
+  header,
 }: {
   slug: string;
   basePath: string;
@@ -91,6 +92,7 @@ export function ConversasBoard({
   initialKey: string | null;
   initialPayload: PanelPayload | null;
   canSeeCost?: boolean;
+  header?: React.ReactNode;
 }) {
   const [search, setSearch] = React.useState("");
   // Filtra a lista por nome ou contato (email/telefone). Busca em tudo que já
@@ -205,7 +207,15 @@ export function ConversasBoard({
   const showLeadAside = !!(payload && payload.kind === "bot");
 
   return (
-    <div className="flex min-h-0 flex-1 gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
+      {/* Cabeçalho (título + abas + filtros): some no CELULAR quando uma conversa
+          está aberta, pra dar tela cheia ao chat. No desktop fica sempre. */}
+      {header ? (
+        <div className={cn("shrink-0", anySelected && "hidden lg:block")}>
+          {header}
+        </div>
+      ) : null}
+      <div className="flex min-h-0 flex-1 gap-3">
       {/* ---- Lista ---- */}
       <aside
         className={cn(
@@ -335,6 +345,7 @@ export function ConversasBoard({
           {lead ? <LeadCard lead={lead} /> : <NoAttribution />}
         </aside>
       ) : null}
+      </div>
     </div>
   );
 }
