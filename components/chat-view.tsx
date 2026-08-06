@@ -131,6 +131,26 @@ function Bubble({
         {text ? (
           <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</p>
         ) : null}
+        {message.sent_email ? (
+          <div className="mt-2 rounded-lg border border-emerald-400/45 bg-emerald-500/10 px-2.5 py-2">
+            <div className="mb-1 text-[11px] font-semibold text-emerald-500 dark:text-emerald-300">
+              📧 E-mail enviado
+            </div>
+            <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-fg [overflow-wrap:anywhere]">
+              {message.sent_email}
+            </p>
+          </div>
+        ) : null}
+        {message.reasoning ? (
+          <details className="mt-2 rounded-lg border border-dashed border-violet-400/40 bg-violet-500/5 px-2.5 py-1.5">
+            <summary className="cursor-pointer select-none text-[11px] font-medium text-violet-500 dark:text-violet-300">
+              🧠 raciocínio do agente (clique para ver)
+            </summary>
+            <p className="mt-1 whitespace-pre-wrap break-words text-[12px] italic leading-snug text-violet-600/80 dark:text-violet-200/70 [overflow-wrap:anywhere]">
+              {message.reasoning}
+            </p>
+          </details>
+        ) : null}
         {media.map((m, i) => (
           <MediaBlock
             key={`${m.file}-${i}`}

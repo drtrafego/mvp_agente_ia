@@ -143,6 +143,8 @@ export type MessageRow = {
   role: string;
   content: string;
   ts: string | null;
+  reasoning: string | null;
+  sent_email: string | null;
 };
 
 export async function getMessages(
@@ -151,7 +153,7 @@ export async function getMessages(
 ): Promise<MessageRow[]> {
   const schema = await safeSchema(slug);
   return sql.unsafe<MessageRow[]>(
-    `select id, role, content, ts
+    `select id, role, content, ts, reasoning, sent_email
      from "${schema}".messages
      where session_id = $1
      order by ts asc nulls last`,
