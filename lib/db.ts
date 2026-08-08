@@ -21,10 +21,12 @@ function create() {
   if (!url) throw new Error("DATABASE_URL não configurada");
   return postgres(toTransactionPooler(url), {
     ssl: "require",
-    max: 3, // menos conexoes por instancia serverless (com transaction mode, ja sobra)
-    idle_timeout: 10, // solta conexao ociosa rapido
-    max_lifetime: 60 * 5, // recicla conexao a cada 5 min
-    connect_timeout: 15,
+    // transaction mode MULTIPLEXA no servidor, entao um max maior aqui NAO estoura o
+    // teto do banco; ajuda a nao enfileirar as queries da pagina (menos lentidao).
+    max: 10,
+    idle_timeout: 20, // solta conexao ociosa
+    max_lifetime: 60 * 30, // recicla conexao a cada 30 min (menos re-handshake)
+    connect_timeout: 10,
     prepare: false, // EXIGIDO pelo transaction mode (6543); inofensivo no session mode
   });
 }
