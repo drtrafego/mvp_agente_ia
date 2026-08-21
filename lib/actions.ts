@@ -18,8 +18,19 @@ import {
 } from "./clients/meta-whatsapp";
 import { expandCampaignVars, resolveVarCount } from "./utils";
 
-const BASE_URL =
-  process.env.HERMES_PANEL_URL ?? "https://hermes.casaldotrafego.com/agente";
+/**
+ * Base da Control API POR AGENTE. Cada bot pode viver numa máquina
+ * diferente (o Gramado Plazza roda em servidor separado), então a URL vem da
+ * coluna panel_url do catálogo. A env global continua valendo só como
+ * fallback para os agentes cadastrados antes dessa coluna existir.
+ */
+function panelBase(agent: Agent): string | null {
+  return (
+    agent.panelUrl ??
+    process.env.HERMES_PANEL_URL ??
+    null
+  );
+}
 
 export type ActionResult = {
   ok: boolean;
@@ -40,6 +51,7 @@ function agentPath(agent: Agent, suffix = ""): string {
 }
 
 async function callPanel(
+  agent: Agent,
   path: string,
   init: RequestInit,
 ): Promise<{ ok: boolean; status: number; data: unknown; error?: string }> {
@@ -52,8 +64,19 @@ async function callPanel(
       error: "PAINEL_API_TOKEN não configurado no servidor.",
     };
   }
+  const base = panelBase(agent);
+  if (!base) {
+    // Agente sem painel publicado ainda (o Gramado Plazza está assim até o
+    // DNS do servidor novo ficar pronto). Ler conversa funciona, agir não.
+    return {
+      ok: false,
+      status: 0,
+      data: null,
+      error: `O painel de controle do ${agent.name} ainda não está publicado, então não dá para pausar nem responder por aqui.`,
+    };
+  }
   try {
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await fetch(`${base}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -88,8 +111,9 @@ async function callPanel(
 
 /** Lista de chat_ids pausados de um agente. Nunca lança: em erro retorna []. */
 export async function getPausedChatIds(slug: string): Promise<string[]> {
-  await assertAgentAccess(slug);
+  const agent = await assertAgentAccess(slug);
   const res = await callPanel(
+    agent,
     `/api/pausados?agente=${encodeURIComponent(slug)}`,
     { method: "GET" },
   );
@@ -107,7 +131,7 @@ export async function togglePauseAction(
   const agent = await assertAgentAccess(slug);
   if (!chatId) return { ok: false, error: "Conversa sem contato vinculado." };
 
-  const res = await callPanel(pause ? "/api/pausar" : "/api/retomar", {
+  const res = await callPanel(agent, pause ? "/api/pausar" : "/api/retomar", {
     method: "POST",
     body: JSON.stringify({ agente: slug, chat_id: chatId }),
   });
@@ -123,7 +147,7 @@ export async function togglePauseAction(
  */
 export async function syncNowAction(slug: string): Promise<ActionResult> {
   const agent = await assertAgentAccess(slug);
-  const res = await callPanel("/api/sync-now", {
+  const res = await callPanel(agent, "/api/sync-now", {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -852,9 +876,10 @@ function normalizeAgenda(raw: unknown): AgendaConfig {
 }
 
 export async function getAgendaConfig(slug: string): Promise<AgendaConfig> {
-  await assertAgentAccess(slug);
+  const agent = await assertAgentAccess(slug);
   try {
     const res = await callPanel(
+      agent,
       `/api/agenda-config?agente=${encodeURIComponent(slug)}`,
       { method: "GET" },
     );
@@ -895,7 +920,7 @@ export async function saveAgendaConfig(
         url,
       },
     };
-    const res = await callPanel("/api/agenda-config", {
+    const res = await callPanel(agent, "/api/agenda-config", {
       method: "POST",
       body: JSON.stringify({ agente: slug, config: wireConfig }),
     });
@@ -923,9 +948,10 @@ function isValidDate(s: string): boolean {
 
 /** Lista as datas bloqueadas, ordenadas. Nunca lança: em erro retorna []. */
 export async function getAgendaBloqueios(slug: string): Promise<AgendaBloqueio[]> {
-  await assertAgentAccess(slug);
+  const agent = await assertAgentAccess(slug);
   try {
     const res = await callPanel(
+      agent,
       `/api/agenda-bloqueios?agente=${encodeURIComponent(slug)}`,
       { method: "GET" },
     );
@@ -952,7 +978,7 @@ export async function blockAgendaDate(
     return { ok: false, error: "Data inválida. Use o seletor de data." };
   }
   try {
-    const res = await callPanel("/api/agenda-bloquear", {
+    const res = await callPanel(agent, "/api/agenda-bloquear", {
       method: "POST",
       body: JSON.stringify({
         agente: slug,
@@ -978,7 +1004,7 @@ export async function unblockAgendaDate(
     return { ok: false, error: "Data inválida." };
   }
   try {
-    const res = await callPanel("/api/agenda-desbloquear", {
+    const res = await callPanel(agent, "/api/agenda-desbloquear", {
       method: "POST",
       body: JSON.stringify({ agente: slug, data: dia }),
     });

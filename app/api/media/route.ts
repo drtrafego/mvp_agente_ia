@@ -1,8 +1,6 @@
 import { NextRequest } from "next/server";
 import { canAccessAgent } from "@/lib/access";
-
-const BASE_URL =
-  process.env.HERMES_PANEL_URL ?? "https://hermes.casaldotrafego.com/agente";
+import { getAgent } from "@/lib/agents";
 
 const FILE_RE = /^[A-Za-z0-9._-]+$/;
 
@@ -25,7 +23,15 @@ export async function GET(req: NextRequest) {
     return new Response("Servidor sem token configurado.", { status: 500 });
   }
 
-  const url = `${BASE_URL}/api/media?agente=${encodeURIComponent(
+  // A mídia mora no servidor do bot, então a base é a do agente, não uma
+  // global: cada bot pode estar numa máquina diferente.
+  const agent = await getAgent(agente);
+  const base = agent?.panelUrl ?? process.env.HERMES_PANEL_URL ?? null;
+  if (!base) {
+    return new Response("Mídia não encontrada.", { status: 404 });
+  }
+
+  const url = `${base}/api/media?agente=${encodeURIComponent(
     agente,
   )}&file=${encodeURIComponent(file)}`;
 

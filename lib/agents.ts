@@ -25,6 +25,13 @@ export type Agent = {
   metaTokenCipher: string | null;
   leadSource: AgentLeadSource;
   leadSourcePageId: string | null;
+  /**
+   * Base da Control API do painel DESTE agente (pausar, responder, agenda).
+   * É por agente, e não uma env global, porque os bots não vivem todos na
+   * mesma máquina: o Gramado Plazza roda em servidor separado (Hetzner) e a
+   * Control API precisa chegar onde o bot está. null = ações indisponíveis.
+   */
+  panelUrl: string | null;
   displayOrder: number;
 };
 
@@ -45,6 +52,7 @@ type AgentRow = {
   meta_token_cipher: string | null;
   lead_source: string | null;
   lead_source_page_id: string | null;
+  panel_url: string | null;
   display_order: number | null;
 };
 
@@ -91,6 +99,7 @@ function toAgent(r: AgentRow): Agent {
     metaTokenCipher: r.meta_token_cipher,
     leadSource: toLeadSource(r.lead_source),
     leadSourcePageId: r.lead_source_page_id,
+    panelUrl: r.panel_url?.trim() || null,
     displayOrder: r.display_order ?? 0,
   };
 }
@@ -109,7 +118,7 @@ async function loadCatalog(): Promise<CatalogState> {
             a.slug, a.schema_name, a.name, a.persona, a.description, a.accent,
             a.meta_phone_number_id, a.meta_waba_id, a.meta_token_env,
             a.meta_token_cipher, a.lead_source, a.lead_source_page_id,
-            a.display_order
+            a.panel_url, a.display_order
      from public.agents a
      join public.organizations o on o.id = a.organization_id
      where a.active = true
