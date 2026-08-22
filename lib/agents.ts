@@ -112,34 +112,18 @@ function buildState(agents: Agent[]): CatalogState {
   };
 }
 
-/**
- * A coluna panel_url é recente e pode não existir em todo ambiente. Se ela
- * entrasse direto no select, um banco sem ela derrubaria o CATÁLOGO INTEIRO,
- * e sem catálogo ninguém vê agente nenhum. Então a consulta tenta com a
- * coluna e, se o banco não a tiver, repete sem ela.
- */
-function catalogQuery(withPanelUrl: boolean): string {
-  return `select a.id, a.organization_id, o.slug as org_slug, o.name as org_name,
+async function loadCatalog(): Promise<CatalogState> {
+  const rows = await sql.unsafe<AgentRow[]>(
+    `select a.id, a.organization_id, o.slug as org_slug, o.name as org_name,
             a.slug, a.schema_name, a.name, a.persona, a.description, a.accent,
             a.meta_phone_number_id, a.meta_waba_id, a.meta_token_env,
             a.meta_token_cipher, a.lead_source, a.lead_source_page_id,
-            ${withPanelUrl ? "a.panel_url" : "null::text as panel_url"},
-            a.display_order
+            a.panel_url, a.display_order
      from public.agents a
      join public.organizations o on o.id = a.organization_id
      where a.active = true
-     order by o.slug, a.display_order, a.slug`;
-}
-
-async function loadCatalog(): Promise<CatalogState> {
-  let rows: AgentRow[];
-  try {
-    rows = await sql.unsafe<AgentRow[]>(catalogQuery(true));
-  } catch {
-    // Sem a coluna: segue sem ela. As ações da Control API caem no
-    // HERMES_PANEL_URL, que é como era antes de panel_url existir.
-    rows = await sql.unsafe<AgentRow[]>(catalogQuery(false));
-  }
+     order by o.slug, a.display_order, a.slug`,
+  );
 
   const agents: Agent[] = [];
   for (const r of rows) {
