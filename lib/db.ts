@@ -27,11 +27,25 @@ function create() {
     // producao e a tela dizendo "nenhum agente". Quem multiplexa e o pooler
     // do Supabase, do lado do servidor; abrir mais conexoes aqui nao acelera
     // nada, so consome o teto compartilhado mais rapido.
-    max: 1,
-    idle_timeout: 10, // solta rapido: instancia ociosa nao pode segurar slot
-    max_lifetime: 60 * 10,
+    // 3, o valor que rodava antes de subir para 10 e estourar o pooler.
+    // Com 1 o catalogo carrega, mas as telas que disparam varias consultas
+    // em paralelo (a visao geral) ficam presas na fila de uma conexao so.
+    // 3 da paralelismo suficiente sem multiplicar demais por instancia.
+    max: 3,
+    // O pooler derruba conexao ociosa sozinho. Se a nossa expirar DEPOIS da
+    // dele, o cliente tenta escrever num socket ja morto e da
+    // CONNECTION_CLOSED. Entao soltamos antes: 5s aqui, e vida curta.
+    idle_timeout: 5,
+    max_lifetime: 60 * 5,
     connect_timeout: 15,
     prepare: false, // EXIGIDO pelo transaction mode (6543); inofensivo no session mode
+    // Sem isto a lib roda uma introspecao de tipos ao abrir CADA conexao.
+    // Em transaction mode isso e round-trip extra em toda query e uma fonte
+    // conhecida de falha com PgBouncer.
+    fetch_types: false,
+    // Aparece em pg_stat_activity: permite ver do lado do banco quem esta
+    // consumindo conexao, o painel ou os syncs do servidor.
+    connection: { application_name: "agente-ia" },
     // Sem isto, um erro de conexao vira unhandled rejection e DERRUBA o
     // processo inteiro (exit 128), levando junto requests que nada tinham a
     // ver. Melhor a consulta falhar e a tela tratar do que a função morrer.
