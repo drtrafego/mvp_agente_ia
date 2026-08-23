@@ -26,7 +26,12 @@ function create() {
     max: 10,
     idle_timeout: 20, // solta conexao ociosa
     max_lifetime: 60 * 30, // recicla conexao a cada 30 min (menos re-handshake)
-    connect_timeout: 10,
+    // 30s, nao 10. Medido em producao: conectar leva de 3s a 12s enquanto o
+    // pooler esta sob pressao. Com 10 o painel desistia ANTES do banco
+    // responder, e a tela dizia "sem acesso a nenhuma empresa" (o acesso faz
+    // falha fechada quando a consulta nao volta). Preferimos esperar a mais
+    // do que devolver tela vazia para o cliente.
+    connect_timeout: 30,
     prepare: false, // EXIGIDO pelo transaction mode (6543); inofensivo no session mode
   });
 }
