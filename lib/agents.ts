@@ -52,18 +52,8 @@ const TTL_MS = 30_000;
 
 type CatalogState = { at: number; agents: Agent[]; bySlug: Map<string, Agent> };
 
-/**
- * O cache vive no globalThis, e não em variável de módulo, para sobreviver a
- * uma recarga do módulo dentro da mesma instância. Numa instância quente,
- * isso é a diferença entre continuar mostrando os agentes durante uma
- * indisponibilidade curta do banco e devolver tela vazia.
- */
-const globalCat = globalThis as unknown as {
-  __catalogCache?: CatalogState | null;
-  __catalogInflight?: Promise<CatalogState> | null;
-};
-let catalogCache: CatalogState | null = globalCat.__catalogCache ?? null;
-let inflight: Promise<CatalogState> | null = globalCat.__catalogInflight ?? null;
+let catalogCache: CatalogState | null = null;
+let inflight: Promise<CatalogState> | null = null;
 
 /**
  * Descarta o catálogo em memória. Chamado depois de gravar a configuração de
@@ -71,7 +61,6 @@ let inflight: Promise<CatalogState> | null = globalCat.__catalogInflight ?? null
  */
 export function invalidateCatalog(): void {
   catalogCache = null;
-  globalCat.__catalogCache = null;
 }
 
 function toAccent(v: string | null): AgentAccent {
@@ -114,34 +103,18 @@ function buildState(agents: Agent[]): CatalogState {
   };
 }
 
-/**
- * Espera curta entre tentativas. O pool do banco satura em rajadas (os syncs
- * do servidor conectam a cada minuto), então a falha costuma durar menos de
- * um segundo. Sem repetir, uma janela dessas apaga o painel inteiro.
- */
-function espera(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function loadCatalogComRetry(): Promise<AgentRow[]> {
-  const tentativas = 3;
-  let ultimoErro: unknown;
-  for (let i = 1; i <= tentativas; i++) {
-    try {
-      return await consultarCatalogo();
-    } catch (err) {
-      ultimoErro = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`Catálogo: tentativa ${i}/${tentativas} falhou: ${msg}`);
-      // 250ms, depois 750ms: cobre a rajada sem segurar a request.
-      if (i < tentativas) await espera(i * 250 + 250 * (i - 1));
-    }
-  }
-  throw ultimoErro;
-}
-
 async function loadCatalog(): Promise<CatalogState> {
-  const rows = await loadCatalogComRetry();
+  const rows = await sql.unsafe<AgentRow[]>(
+    `select a.id, a.organization_id, o.slug as org_slug, o.name as org_name,
+            a.slug, a.schema_name, a.name, a.persona, a.description, a.accent,
+            a.meta_phone_number_id, a.meta_waba_id, a.meta_token_env,
+            a.meta_token_cipher, a.lead_source, a.lead_source_page_id,
+            a.display_order
+     from public.agents a
+     join public.organizations o on o.id = a.organization_id
+     where a.active = true
+     order by o.slug, a.display_order, a.slug`,
+  );
 
   const agents: Agent[] = [];
   for (const r of rows) {
@@ -158,20 +131,6 @@ async function loadCatalog(): Promise<CatalogState> {
   return buildState(agents);
 }
 
-async function consultarCatalogo(): Promise<AgentRow[]> {
-  return sql.unsafe<AgentRow[]>(
-    `select a.id, a.organization_id, o.slug as org_slug, o.name as org_name,
-            a.slug, a.schema_name, a.name, a.persona, a.description, a.accent,
-            a.meta_phone_number_id, a.meta_waba_id, a.meta_token_env,
-            a.meta_token_cipher, a.lead_source, a.lead_source_page_id,
-            a.display_order
-     from public.agents a
-     join public.organizations o on o.id = a.organization_id
-     where a.active = true
-     order by o.slug, a.display_order, a.slug`,
-  );
-}
-
 async function readCatalog(): Promise<CatalogState> {
   const now = Date.now();
   if (catalogCache && now - catalogCache.at < TTL_MS) return catalogCache;
@@ -180,7 +139,6 @@ async function readCatalog(): Promise<CatalogState> {
   inflight = loadCatalog()
     .then((state) => {
       catalogCache = state;
-      globalCat.__catalogCache = state;
       return state;
     })
     .catch((err) => {
@@ -195,10 +153,8 @@ async function readCatalog(): Promise<CatalogState> {
     })
     .finally(() => {
       inflight = null;
-      globalCat.__catalogInflight = null;
     });
 
-  globalCat.__catalogInflight = inflight;
   return inflight;
 }
 
