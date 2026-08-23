@@ -32,17 +32,14 @@ function create() {
     // em paralelo (a visao geral) ficam presas na fila de uma conexao so.
     // 3 da paralelismo suficiente sem multiplicar demais por instancia.
     max: 3,
-    // O pooler derruba conexao ociosa sozinho. Se a nossa expirar DEPOIS da
-    // dele, o cliente tenta escrever num socket ja morto e da
-    // CONNECTION_CLOSED. Entao soltamos antes: 5s aqui, e vida curta.
-    idle_timeout: 5,
-    max_lifetime: 60 * 5,
+    // 20s, nao 5. Abrir conexao custa ~600ms contra ~60ms de uma consulta em
+    // conexao quente (medido em producao pelo /api/diag). Reciclar agressivo
+    // faz cada pagina pesada pagar esse meio segundo varias vezes, e a visao
+    // geral dispara dezenas de consultas.
+    idle_timeout: 20,
+    max_lifetime: 60 * 30,
     connect_timeout: 15,
     prepare: false, // EXIGIDO pelo transaction mode (6543); inofensivo no session mode
-    // Sem isto a lib roda uma introspecao de tipos ao abrir CADA conexao.
-    // Em transaction mode isso e round-trip extra em toda query e uma fonte
-    // conhecida de falha com PgBouncer.
-    fetch_types: false,
     // Aparece em pg_stat_activity: permite ver do lado do banco quem esta
     // consumindo conexao, o painel ou os syncs do servidor.
     connection: { application_name: "agente-ia" },
