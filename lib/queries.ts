@@ -161,6 +161,70 @@ export async function getMessages(
   );
 }
 
+/**
+ * Mensagens de TODAS as sessões do mesmo contato, em ordem cronológica.
+ *
+ * O bot encerra a sessão quando a conversa termina (ended_at preenchido), e
+ * um lembrete disparado dias depois nasce como sessão nova. O telefone é o
+ * mesmo, mas a história fica partida em dois cards e não dá para entender o
+ * que aconteceu. Caso real: o número 557597156770 tem a consulta de 21/08
+ * com 23 mensagens e a confirmação de 23/08 com 3, sem nenhum vínculo.
+ *
+ * O match é o mesmo usado no resto do projeto: só dígitos, e o sufixo de 8
+ * cobre variação de DDI e do 9º dígito.
+ *
+ * Isto é remendo de exibição. O conserto de verdade é o bot reaproveitar a
+ * sessão do contato em vez de abrir outra.
+ */
+export async function getMessagesByContact(
+  slug: string,
+  chatId: string,
+): Promise<MessageRow[]> {
+  const schema = await safeSchema(slug);
+  const digitos = (chatId ?? "").replace(/\D/g, "");
+  if (!digitos) return [];
+  const sufixo = digitos.length >= 8 ? digitos.slice(-8) : null;
+  try {
+    return await sql.unsafe<MessageRow[]>(
+      `select m.id, m.role, m.content, m.ts, m.reasoning, m.sent_email
+         from "${schema}".messages m
+         join "${schema}".conversations c on c.session_id = m.session_id
+        where regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = $1
+           ${sufixo ? `or (length(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g')) >= 8
+                 and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8) = $2)` : ""}
+        order by m.ts asc nulls last`,
+      sufixo ? [digitos, sufixo] : [digitos],
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** As sessões de um contato, da mais antiga para a mais nova. */
+export async function getSessionsByContact(
+  slug: string,
+  chatId: string,
+): Promise<ConversationRow[]> {
+  const schema = await safeSchema(slug);
+  const digitos = (chatId ?? "").replace(/\D/g, "");
+  if (!digitos) return [];
+  const sufixo = digitos.length >= 8 ? digitos.slice(-8) : null;
+  try {
+    return await sql.unsafe<ConversationRow[]>(
+      `select session_id, chat_id, channel, title, started_at, ended_at,
+              message_count, cost_usd
+         from "${schema}".conversations
+        where regexp_replace(coalesce(chat_id, ''), '\\D', '', 'g') = $1
+           ${sufixo ? `or (length(regexp_replace(coalesce(chat_id, ''), '\\D', '', 'g')) >= 8
+                 and right(regexp_replace(coalesce(chat_id, ''), '\\D', '', 'g'), 8) = $2)` : ""}
+        order by started_at asc nulls last`,
+      sufixo ? [digitos, sufixo] : [digitos],
+    );
+  } catch {
+    return [];
+  }
+}
+
 export async function getConversation(
   slug: string,
   sessionId: string,
@@ -258,10 +322,69 @@ export async function getBotConversations(
     );
     const norm = (o: string): ConvOrigin =>
       o === "Disparo" ? "Disparo" : o === "Anúncio" ? "Anúncio" : "Direto";
-    return rows.map((r) => ({ ...r, origin: norm(r.origin) }));
+    return agruparPorContato(rows.map((r) => ({ ...r, origin: norm(r.origin) })));
   } catch {
     return [];
   }
+}
+
+/**
+ * Junta as sessões do mesmo telefone numa linha só.
+ *
+ * Feito em memória, DEPOIS da consulta, de propósito: a query acima já é
+ * pesada (vários EXISTS com regexp por conversa) e mexer nela para agrupar
+ * arriscaria a tela que mais sofre com lentidão. Aqui o custo é desprezível,
+ * são poucas centenas de linhas.
+ *
+ * A linha resultante representa o CONTATO: fica com a sessão mais recente
+ * (é ela que o usuário quer abrir), o título mais recente, a soma das
+ * mensagens e do custo, e a data de início da PRIMEIRA conversa, que é
+ * quando aquela pessoa apareceu pela primeira vez.
+ *
+ * Conversa sem chat_id (e-mail, por exemplo) passa intacta, sem agrupar.
+ */
+function agruparPorContato(linhas: BotConvRow[]): BotConvRow[] {
+  // guarda a data da última atividade à parte: o started_at da linha vira o
+  // da PRIMEIRA sessão, então ele não serve mais para ordenar por recência.
+  type Grupo = { linha: BotConvRow; ultima: string };
+  const porContato = new Map<string, Grupo>();
+  const soltas: Grupo[] = [];
+  const recencia = (l: BotConvRow) => l.started_at ?? l.ended_at ?? "";
+
+  for (const linha of linhas) {
+    const digitos = (linha.chat_id ?? "").replace(/\D/g, "");
+    // menos de 8 dígitos não é telefone confiável: não agrupa, para não
+    // juntar contatos diferentes por engano.
+    const chave = digitos.length >= 8 ? digitos.slice(-8) : null;
+    if (!chave) {
+      soltas.push({ linha, ultima: recencia(linha) });
+      continue;
+    }
+    const grupo = porContato.get(chave);
+    if (!grupo) {
+      porContato.set(chave, { linha: { ...linha }, ultima: recencia(linha) });
+      continue;
+    }
+    // as linhas vêm da mais recente para a mais antiga, então a primeira de
+    // cada contato já é a mais nova: só acumulamos o resto nela.
+    const alvo = grupo.linha;
+    alvo.message_count = (alvo.message_count ?? 0) + (linha.message_count ?? 0);
+    // numeric do Postgres chega como string: soma como número e volta a
+    // string, senão o tipo da linha muda e quem formata quebra.
+    alvo.cost_usd = String(Number(alvo.cost_usd ?? 0) + Number(linha.cost_usd ?? 0));
+    // início = a conversa mais antiga daquele contato
+    if (linha.started_at && (!alvo.started_at || linha.started_at < alvo.started_at)) {
+      alvo.started_at = linha.started_at;
+    }
+    // origem "Direto" é o padrão: se alguma sessão tem origem melhor, ela vale
+    if (alvo.origin === "Direto" && linha.origin !== "Direto") {
+      alvo.origin = linha.origin;
+    }
+  }
+
+  return [...porContato.values(), ...soltas]
+    .sort((a, b) => b.ultima.localeCompare(a.ultima))
+    .map((g) => g.linha);
 }
 
 export type OutreachConvo = {

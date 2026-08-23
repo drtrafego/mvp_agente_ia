@@ -4,6 +4,7 @@ import {
   getBotConversations,
   getConversation,
   getMessages,
+  getMessagesByContact,
   getLeadForConversation,
   getOutreachConvos,
   getOutreachConvo,
@@ -69,7 +70,13 @@ export default async function ConversasPage({
     const conversation = await getConversation(slug, c);
     if (conversation) {
       const [messages, paused, lead, templates] = await Promise.all([
-        getMessages(slug, conversation.session_id),
+        // Todas as sessões DESTE CONTATO, não só a sessão aberta: o bot
+        // encerra a sessão e um lembrete dias depois nasce como outra, o que
+        // partia a história do lead em dois cards. Sem chat_id (e-mail) não
+        // há como agrupar, então cai na sessão única.
+        conversation.chat_id
+          ? getMessagesByContact(slug, conversation.chat_id)
+          : getMessages(slug, conversation.session_id),
         conversation.chat_id ? getPausedChatIds(slug) : Promise.resolve<string[]>([]),
         getLeadForConversation(conversation),
         sendEnabled ? getApprovedTemplates(slug) : Promise.resolve([]),
