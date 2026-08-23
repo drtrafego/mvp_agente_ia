@@ -19,7 +19,14 @@ const CSP_FRAME_ANCESTORS =
  */
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname.startsWith("/handler") || pathname.startsWith("/api/dispatch")
+    pathname.startsWith("/handler") ||
+    pathname.startsWith("/api/dispatch") ||
+    // /api/diag é o diagnóstico TEMPORÁRIO do catálogo. Fica fora do gate
+    // porque serve justamente para investigar quando o painel não carrega, e
+    // o gate devolveria a tela de login em vez do JSON. Não expõe credencial
+    // nem dado de cliente: só host e porta do banco, tempo da consulta e a
+    // contagem de agentes. Remover junto com a rota.
+    pathname.startsWith("/api/diag")
   );
 }
 
