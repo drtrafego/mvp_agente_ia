@@ -72,12 +72,16 @@ export function ChatView({
             Nenhuma mensagem registrada nesta conversa.
           </p>
         ) : (
-          messages.map((m) => (
+          messages.map((m, i) => (
             <Bubble
               key={m.id}
               message={m}
               channel={conversation.channel}
               slug={slug}
+              // nome so na PRIMEIRA mensagem de cada bloco do mesmo falante:
+              // repetir em toda bolha vira ruido numa conversa longa
+              nomeLead={conversation.title ?? conversation.chat_id ?? "Cliente"}
+              mostrarNome={i === 0 || messages[i - 1]?.role !== m.role}
             />
           ))
         )}
@@ -99,10 +103,14 @@ function Bubble({
   message,
   channel,
   slug,
+  nomeLead,
+  mostrarNome,
 }: {
   message: MessageRow;
   channel: string | null;
   slug: string;
+  nomeLead?: string;
+  mostrarNome?: boolean;
 }) {
   const isUser = message.role === "user";
   const { text, media } = cleanMessage(message.content, message.role, channel);
@@ -122,12 +130,26 @@ function Bubble({
         {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
       </div>
       <div
+        // CONTRASTE ENTRE OS DOIS LADOS (24/08). Antes a bolha do agente era um
+        // azul com 20% de opacidade: sobre o fundo escuro ficava quase do mesmo
+        // cinza da bolha do cliente, e o Gastao lia mensagem de cliente achando
+        // que era da Nina. Agora sao duas cores solidas da mesma familia:
+        // cinza pro cliente, azul da marca pro agente.
         className={`min-w-0 max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
           isUser
-            ? "rounded-bl-sm bg-surface-2 text-fg"
-            : "rounded-br-sm bg-gradient-to-br from-secondary/20 to-accent-2/15 text-fg ring-1 ring-inset ring-secondary/25"
+            ? "rounded-bl-sm border border-border-strong bg-surface-3 text-fg"
+            : "rounded-br-sm border border-secondary bg-primary text-primary-fg"
         }`}
       >
+        {mostrarNome && nomeLead ? (
+          <span
+            className={`mb-1 block text-[11px] uppercase tracking-wide ${
+              isUser ? "text-muted" : "text-primary-fg/75"
+            }`}
+          >
+            {isUser ? nomeLead : "Nina"}
+          </span>
+        ) : null}
         {text ? (
           <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{text}</p>
         ) : null}
