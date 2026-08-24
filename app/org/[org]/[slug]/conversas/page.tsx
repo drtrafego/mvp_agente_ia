@@ -111,7 +111,11 @@ export default async function ConversasPage({
       title: cv.title ?? "Conversa sem título",
       handle: cv.chat_id,
       origin: cv.origin,
-      date: cv.started_at,
+      // ordena pela ULTIMA mensagem, nao pela primeira (24/08): uma conversa
+      // antiga que acabou de receber mensagem tem que subir pro topo, igual
+      // WhatsApp. Antes, uma conversa iniciada dia 16 ficava enterrada mesmo
+      // com resposta de agora, e o dono nao via o que estava acontecendo.
+      date: cv.ended_at ?? cv.started_at,
       count: cv.message_count,
     })),
     ...outreachConvos.map((oc) => ({

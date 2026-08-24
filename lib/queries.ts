@@ -253,7 +253,7 @@ export async function getBotConversations(
          from "${schema}".messages m where m.session_id = c.session_id
        ) mm on true
        where ${conds.join(" and ")}
-       order by coalesce(c.started_at, c.ended_at) desc nulls last`,
+       order by coalesce(c.ended_at, c.started_at) desc nulls last`,
       [slug],
     );
     const norm = (o: string): ConvOrigin =>
@@ -703,7 +703,7 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
                    = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
              )
            )
-           order by coalesce(c.started_at, c.ended_at) desc nulls last
+           order by coalesce(c.ended_at, c.started_at) desc nulls last
            limit 1
          ) conv on true
          order by coalesce(l.first_contact_at, l.created_at) desc nulls last`,
@@ -758,7 +758,7 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
                  = right(l.phone_norm, 8)
            )
          )
-         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         order by coalesce(c.ended_at, c.started_at) desc nulls last
          limit 1
        ) conv on true
        where l.page_id = $1
@@ -806,7 +806,7 @@ export async function getFormLeads(slug: string): Promise<FormLead[]> {
                  = right(r.phone_norm, 8)
            )
          )
-         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         order by coalesce(c.ended_at, c.started_at) desc nulls last
          limit 1
        ) conv on true
        order by r.phone_norm, r.ts desc`,
@@ -1097,12 +1097,12 @@ export async function getDashboard(
            )
            order by l.created_time desc nulls last limit 1
          ) lead on true
-         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         order by coalesce(c.ended_at, c.started_at) desc nulls last
          limit 8`
       : `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
                 c.message_count, null::text full_name
          from "${schema}".conversations c
-         order by coalesce(c.started_at, c.ended_at) desc nulls last
+         order by coalesce(c.ended_at, c.started_at) desc nulls last
          limit 8`;
   const recentParams: SqlParam[] =
     src.leadSource === "form" ? [src.pageId] : [];
