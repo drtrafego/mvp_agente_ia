@@ -3,6 +3,8 @@ import { isSuperAdmin } from "@/lib/admin";
 import { PageHeader } from "@/components/page-header";
 import { PageWrapper } from "@/components/page-wrapper";
 import { AgentSettingsForm } from "@/components/agent-settings-form";
+import { GlobalPauseCard } from "@/components/global-pause-card";
+import { getGlobalPause } from "@/lib/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,7 @@ export default async function ConfiguracoesPage({
   const agent = await assertAgentAccess(slug);
   const email = await getSessionEmail();
   const canEdit = isSuperAdmin(email);
+  const pause = await getGlobalPause(slug);
 
   return (
     <PageWrapper>
@@ -22,6 +25,7 @@ export default async function ConfiguracoesPage({
         title="Configurações"
         subtitle="Identificação, número da Meta e fonte de leads deste agente"
       />
+      <GlobalPauseCard slug={slug} agentName={agent.name} initial={pause} />
       <AgentSettingsForm
         canEdit={canEdit}
         initial={{

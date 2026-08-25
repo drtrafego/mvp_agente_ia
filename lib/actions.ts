@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { sql } from "./db";
 import type { Agent } from "./agents";
-import { assertAgentAccess } from "./access";
+import { assertAgentAccess, getSessionEmail } from "./access";
 import { getMetaConfig, getMetaToken } from "./meta-config";
 import { sendTemplateToLeadsInternal } from "./outreach";
 import type {
@@ -114,6 +114,65 @@ export async function togglePauseAction(
   if (!res.ok) return { ok: false, error: res.error };
 
   revalidatePath(agentPath(agent, "/conversas"));
+  return { ok: true };
+}
+
+/** Estado da pausa GLOBAL: o bot inteiro calado, não só uma conversa. */
+export type GlobalPause = {
+  paused: boolean;
+  /** Epoch em segundos de quando foi pausado, ou null. */
+  since: number | null;
+  /** Quem pausou (identificador do operador, sem o domínio do e-mail). */
+  by: string;
+};
+
+/**
+ * Lê a pausa global do agente direto do painel. Nunca lança: se o painel não
+ * responder, devolve "não pausado" para não travar a tela inteira. O estado
+ * verdadeiro é o arquivo dentro do container, o painel só reflete o que está lá.
+ */
+export async function getGlobalPause(slug: string): Promise<GlobalPause> {
+  await assertAgentAccess(slug);
+  const res = await callPanel(
+    `/api/pausa-global?agente=${encodeURIComponent(slug)}`,
+    { method: "GET" },
+  );
+  if (!res.ok) return { paused: false, since: null, by: "" };
+  const d = res.data as {
+    pausado?: unknown;
+    desde?: unknown;
+    por?: unknown;
+  } | null;
+  return {
+    paused: Boolean(d?.pausado),
+    since: typeof d?.desde === "number" ? d.desde : null,
+    by: typeof d?.por === "string" ? d.por : "",
+  };
+}
+
+/**
+ * Pausa ou retoma o BOT INTEIRO deste agente (todas as conversas e também o
+ * follow-up). Ação perigosa: enquanto pausado, nenhum lead é atendido.
+ */
+export async function toggleGlobalPauseAction(
+  slug: string,
+  pause: boolean,
+): Promise<ActionResult> {
+  const agent = await assertAgentAccess(slug);
+  const email = await getSessionEmail();
+  // só o identificador antes do @: dá para saber quem pausou sem gravar o
+  // e-mail inteiro num arquivo dentro do container do bot.
+  const por = email ? email.split("@")[0] : "";
+
+  const res = await callPanel("/api/pausar-tudo", {
+    method: "POST",
+    body: JSON.stringify({ agente: slug, pausar: pause, por }),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  // "layout": o aviso de bot pausado vive no layout do agente, então precisa
+  // revalidar todas as telas filhas, não só a de configurações.
+  revalidatePath(agentPath(agent), "layout");
   return { ok: true };
 }
 
