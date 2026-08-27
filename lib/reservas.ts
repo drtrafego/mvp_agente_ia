@@ -109,7 +109,17 @@ export async function getReservas(
   slug: string,
   period: Period,
 ): Promise<ReservasResumo | null> {
-  if (!temReservas(slug)) return null;
+  if (!temReservas(slug)) {
+    // agente que ESTÁ no mapa mas não achou variável: quase sempre é nome
+    // errado na Vercel, e sem isto a tela só volta ao funil antigo, calada.
+    if (ENV_POR_SLUG[slug]) {
+      console.error(
+        `[reservas] "${slug}" está no mapa mas nenhuma env foi encontrada. ` +
+          `Esperava uma destas: ${ENV_POR_SLUG[slug].join(", ")}`,
+      );
+    }
+    return null;
+  }
 
   const { from, to, curStart, curEnd, prevStart, prevEnd } = resolveRange(period);
   const sql = conn(slug);
@@ -188,8 +198,21 @@ export async function getReservas(
         pessoas: Number(real?.pessoas ?? 0),
       },
     };
-  } catch {
-    // banco do cliente fora do ar não pode derrubar o painel inteiro
+  } catch (e) {
+    // ⚠️ O banco do cliente fora do ar NÃO pode derrubar o painel, então
+    // engolimos o erro. Mas engolir CALADO já custou meia hora de adivinhação
+    // em 27/08: a tela mostrava o funil antigo e não dava pra saber se era
+    // variável com nome errado, banco fora, ou query quebrada.
+    // Agora o motivo vai pro log da Vercel, onde dá pra ler.
+    console.error(
+      `[reservas] falhou para "${slug}" (env ${envUsada(slug) ?? "NENHUMA CONFIGURADA"}):`,
+      e instanceof Error ? e.message : e,
+    );
     return null;
   }
+}
+
+/** Qual variável foi encontrada pra este agente. Só pra diagnóstico/log. */
+export function envUsada(slug: string): string | null {
+  return (ENV_POR_SLUG[slug] ?? []).find((n) => process.env[n]) ?? null;
 }
