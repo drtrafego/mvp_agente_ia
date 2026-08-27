@@ -3,6 +3,9 @@ import {
   MessagesSquare,
   Target,
   TrendingUp,
+  Users,
+  DollarSign,
+  MessageSquare,
   Trophy,
   Radio,
   Megaphone,
@@ -17,6 +20,7 @@ import {
 import { assertAgentAccess } from "@/lib/access";
 import { getDashboard, type DashboardData } from "@/lib/queries";
 import { maiorPerda, taxaFimAFim, type Funil } from "@/lib/funil";
+import { KpiCard } from "@/components/kpi";
 import {
   parsePeriod,
   serializePeriod,
@@ -31,6 +35,7 @@ import { FunilTimeline, CategoryDonut, CampaignBars } from "@/components/charts"
 import {
   formatNumber,
   formatPct,
+  formatBRL,
   pctDelta,
   platformLabel,
   channelLabel,
@@ -99,7 +104,8 @@ export default async function OverviewPage({
 
       {abaAtiva === "funil" ? (
         <div className="space-y-5">
-          <ResumoSection funil={d.funil} />
+        <KpiCards d={d} funil={d.funil} />
+        <ResumoSection funil={d.funil} />
           <FunilSection d={d} />
           <EvolucaoSection funil={d.funil} todayStr={todayStr} />
           <RecentSection basePath={basePath} rows={d.recent} />
@@ -151,6 +157,68 @@ function Abas({
 }
 
 /* ---- 1. A taxa que importa: fim a fim ---- */
+
+/**
+ * Os KPIs mais importantes em cards, no topo. Ele pediu esse formato de volta
+ * em 27/08 ("o layout de ontem estava melhor, quero os cards acima").
+ *
+ * A diferença pro layout antigo é a FONTE: cada card sai de uma etapa do funil,
+ * não das tabelas mortas (meta_leads tinha 19 linhas na vida inteira). Card de
+ * etapa que este bot não mede simplesmente não aparece, em vez de mostrar zero.
+ */
+function KpiCards({ d, funil }: { d: DashboardData; funil: Funil }) {
+  const taxa = taxaFimAFim(funil);
+  const r = d.reservas;
+
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {taxa ? (
+        <KpiCard
+          label={taxa.completo ? "Taxa de conversão" : `Até ${taxa.fim.verbo}`}
+          value={formatPct(taxa.pct, 1)}
+          icon={<TrendingUp className="size-4" />}
+          tone="success"
+          hint={`${formatNumber(taxa.fim.value)} de ${formatNumber(taxa.topo.value)} ${funil.unidade}`}
+        />
+      ) : null}
+
+      {funil.etapas.map((e) => (
+        <KpiCard
+          key={e.key}
+          label={e.label}
+          value={formatNumber(e.value)}
+          icon={<Users className="size-4" />}
+          tone={e.key === "fechou" ? "primary" : "accent"}
+          delta={
+            funil.comparavel && e.previous !== null
+              ? pctDelta(e.value, e.previous)
+              : null
+          }
+          hint={e.hint ?? e.fonte}
+        />
+      ))}
+
+      {r ? (
+        <KpiCard
+          label="Receita"
+          value={formatBRL(r.receita)}
+          icon={<DollarSign className="size-4" />}
+          tone="success"
+          hint={`${formatNumber(r.pessoas)} pessoas`}
+        />
+      ) : null}
+
+      <KpiCard
+        label="Ativas (24h)"
+        value={formatNumber(d.conversasAtivas)}
+        icon={<MessageSquare className="size-4" />}
+        tone="accent"
+        hint="com mensagem recente"
+      />
+    </div>
+  );
+}
+
 function ResumoSection({ funil }: { funil: Funil }) {
   const taxa = taxaFimAFim(funil);
   const perda = maiorPerda(funil);
