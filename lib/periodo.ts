@@ -12,6 +12,9 @@
  * -03:00 é seguro e evita depender de tz database no runtime.
  */
 
+/** Primeiro dia que pode ter dado. Usado pelo preset "Todo o período". */
+export const INICIO_DA_OPERACAO = "2026-01-01";
+
 /** Offset fixo do fuso do cliente, em minutos. */
 export const TZ_OFFSET_MIN = -180; // America/Sao_Paulo, UTC-3
 
@@ -23,7 +26,8 @@ export type PeriodPreset =
   | "30d"
   | "90d"
   | "thisMonth"
-  | "lastMonth";
+  | "lastMonth"
+  | "all";
 
 /** Intervalo escolhido no calendário. Datas em AAAA-MM-DD, fuso do cliente. */
 export type PeriodCustom = { from: string; to: string };
@@ -39,6 +43,7 @@ export const PRESETS: { key: PeriodPreset; label: string }[] = [
   { key: "90d", label: "Últimos 90 dias" },
   { key: "thisMonth", label: "Este mês" },
   { key: "lastMonth", label: "Mês passado" },
+  { key: "all", label: "Todo o período" },
 ];
 
 const PRESET_KEYS = new Set<string>(PRESETS.map((p) => p.key));
@@ -127,6 +132,12 @@ export function resolveDays(
   } else if (p === "thisMonth") {
     from = `${hoje.slice(0, 7)}-01`;
     to = hoje;
+  } else if (p === "all") {
+    // Não existe operação antes de 2026 nesses bots. Data fixa evita uma
+    // consulta só pra descobrir o primeiro registro, e o período anterior
+    // fica vazio de propósito: "todo o período" não tem com o que comparar.
+    from = INICIO_DA_OPERACAO;
+    to = hoje;
   } else if (p === "lastMonth") {
     const primeiroDesteMes = `${hoje.slice(0, 7)}-01`;
     to = addDays(primeiroDesteMes, -1);
@@ -136,6 +147,13 @@ export function resolveDays(
     const n = Number(p.replace("d", "")) || 7;
     to = hoje;
     from = addDays(hoje, -(n - 1));
+  }
+
+  // "Todo o período" não tem com o que comparar: devolve janela anterior VAZIA
+  // (prevFrom depois de prevTo), pra tela esconder a variação em vez de
+  // inventar "+100%" contra um passado que não existe.
+  if (p === "all") {
+    return { from, to, prevFrom: to, prevTo: from };
   }
 
   const n = daysInRange(from, to);
