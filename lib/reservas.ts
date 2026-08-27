@@ -216,3 +216,56 @@ export async function getReservas(
 export function envUsada(slug: string): string | null {
   return (ENV_POR_SLUG[slug] ?? []).find((n) => process.env[n]) ?? null;
 }
+
+export type DiagReservas = {
+  slug: string;
+  noMapa: boolean;
+  nomesEsperados: string[];
+  envUsada: string | null;
+  /** Host do banco, sem usuário e sem senha. Só pra confirmar que é o certo. */
+  host: string | null;
+  totalReservas: number | null;
+  erro: string | null;
+};
+
+/**
+ * Diagnóstico da conexão, pra tela /diag-reservas.
+ *
+ * ⚠️ NUNCA devolve a credencial. Só o NOME da variável e o HOST, porque foi
+ * isso que faltou saber em 27/08: build ok, deploy ok, nome certo, log limpo,
+ * e mesmo assim a seção não aparecia. Sem enxergar o que o servidor enxerga,
+ * a investigação vira adivinhação por mensagem.
+ */
+export async function diagnosticoReservas(slug: string): Promise<DiagReservas> {
+  const nomesEsperados = ENV_POR_SLUG[slug] ?? [];
+  const envUsada = nomesEsperados.find((n) => process.env[n]) ?? null;
+
+  let host: string | null = null;
+  if (envUsada) {
+    try {
+      host = new URL(process.env[envUsada] as string).host;
+    } catch {
+      host = "(valor não parece uma URL de conexão válida)";
+    }
+  }
+
+  const base: DiagReservas = {
+    slug,
+    noMapa: nomesEsperados.length > 0,
+    nomesEsperados,
+    envUsada,
+    host,
+    totalReservas: null,
+    erro: envUsada ? null : "nenhuma variável de ambiente encontrada",
+  };
+  if (!envUsada) return base;
+
+  try {
+    const [row] = await conn(slug)<{ n: string }[]>`
+      select count(*) n from public.reservas
+    `;
+    return { ...base, totalReservas: Number(row?.n ?? 0) };
+  } catch (e) {
+    return { ...base, erro: e instanceof Error ? e.message : String(e) };
+  }
+}
