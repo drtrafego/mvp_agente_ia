@@ -921,7 +921,11 @@ export async function getLeads(slug: string): Promise<Record<Stage, Lead[]>> {
 
 // Dashboard "Visão geral" (gestor de tráfego) -------------------------
 
-export type Period = "today" | "7d" | "30d";
+// ⚠️ O período agora mora em lib/periodo.ts, com fuso do cliente e intervalo
+// personalizado. Re-exportado aqui pra não quebrar quem já importava daqui.
+export type { Period } from "./periodo";
+import { resolveRange, type Period } from "./periodo";
+import { getReservas, type ReservasResumo } from "./reservas";
 
 export type Delta = { current: number; previous: number };
 
@@ -938,6 +942,8 @@ export type DashboardData = {
   engajaram: number;
   agendaram: number;
   conversasAtivas: number;
+  /** Reservas do restaurante, lidas do banco dele. null = agente sem reservas. */
+  reservas: ReservasResumo | null;
   custoUsd: Delta;
   timeline: { day: string; leads: number; conversas: number; cost: number }[];
   adRanking: {
@@ -963,34 +969,15 @@ export type DashboardData = {
   }[];
 };
 
+/**
+ * ⚠️ ANTES ISTO USAVA `new Date().setHours(0,0,0,0)`, que na Vercel é meia-noite
+ * UTC = 21h do dia anterior no horário do cliente. Resultado real em 26/08: a
+ * tela do Gramado mostrou 16 conversas no filtro "Hoje" num dia que teve 63,
+ * porque o "hoje" dela tinha começado 1h20 antes. Agora o corte é a meia-noite
+ * LOCAL, e o período aceita intervalo personalizado (ver lib/periodo.ts).
+ */
 function periodRange(period: Period) {
-  const now = new Date();
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-
-  let curStart: Date;
-  let prevStart: Date;
-  let prevEnd: Date;
-
-  if (period === "today") {
-    curStart = new Date(startOfToday);
-    prevEnd = new Date(startOfToday);
-    prevStart = new Date(startOfToday);
-    prevStart.setDate(prevStart.getDate() - 1);
-  } else {
-    const days = period === "30d" ? 30 : 7;
-    curStart = new Date(now.getTime() - days * 86400000);
-    prevEnd = new Date(curStart);
-    prevStart = new Date(now.getTime() - 2 * days * 86400000);
-  }
-
-  return {
-    curStart: curStart.toISOString(),
-    curEnd: now.toISOString(),
-    prevStart: prevStart.toISOString(),
-    prevEnd: prevEnd.toISOString(),
-    todayStart: startOfToday.toISOString(),
-  };
+  return resolveRange(period);
 }
 
 function daysBetween(startIso: string, endIso: string): string[] {
@@ -1343,6 +1330,10 @@ export async function getDashboard(
     ),
   ]);
 
+  // reservas do restaurante: banco separado, então vai numa ida própria.
+  // Nunca derruba a página: se o banco do cliente cair, volta null.
+  const reservas = await getReservas(slug, period);
+
   const leadsMap = new Map(leadsByDay.map((r) => [r.day, r.v]));
   const convMap = new Map(convByDay.map((r) => [r.day, r.v]));
   const costMap = new Map(convByDay.map((r) => [r.day, Number(r.c)]));
@@ -1362,7 +1353,10 @@ export async function getDashboard(
     conversas: { current: convCur, previous: convPrev },
     conversaram: { current: conversaramCur, previous: conversaramPrev },
     engajaram,
-    agendaram: 0,
+    // ⚠️ "agendaram" era 0 fixo e a tela mostrava "em breve". Pro agente que
+    // tem restaurante, agora é a reserva de verdade, lida do banco dele.
+    agendaram: reservas?.feitas ?? 0,
+    reservas,
     conversasAtivas,
     custoUsd: { current: custoCur, previous: custoPrev },
     timeline,

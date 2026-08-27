@@ -1,0 +1,91 @@
+========================================================================
+COMO TROCAR A URL DO BANCO NA VERCEL (painel dos agentes / mvp_agente_ia)
+Objetivo: evitar o banco "entupir" de conexoes (bug do painel aparecer VAZIO,
+"sem nenhum agente"). Usar o pooler em TRANSACTION mode (porta 6543).
+========================================================================
+
+IMPORTANTE: isso agora e OPCIONAL / REFORCO.
+O codigo do painel ja foi ajustado (07/08) pra usar o transaction mode sozinho.
+Entao o painel ja fica protegido SEM voce fazer nada aqui.
+Faca os passos abaixo so se quiser deixar tambem "na fonte" (recomendado a longo
+prazo) ou se algum dia o problema voltar.
+
+------------------------------------------------------------------------
+JEITO RAPIDO (mais facil, 30 segundos): so trocar UM numero
+------------------------------------------------------------------------
+1. Entra na Vercel: https://vercel.com  (sua conta drtrafego)
+2. Abre o projeto:  mvp_agente_ia
+3. No topo, clica em:  Settings
+4. No menu da esquerda, clica em:  Environment Variables
+5. Acha a variavel chamada:  DATABASE_URL
+6. Clica nos 3 pontinhos do lado dela, e depois em  Edit
+7. No valor, procura o trecho ":5432" e troca por ":6543"
+   (e literalmente mudar o numero 5432 para 6543, o resto fica igual)
+   Exemplo:
+     ANTES: ...pooler.supabase.com:5432/postgres
+     DEPOIS:...pooler.supabase.com:6543/postgres
+8. Marca os 3 ambientes (Production, Preview, Development) e clica  Save
+9. Faz um redeploy: aba  Deployments  ,  nos 3 pontinhos do ultimo deploy,
+   clica em  Redeploy .
+
+------------------------------------------------------------------------
+JEITO "PELA FONTE" (pegar a URL certa no Supabase): so se preferir
+------------------------------------------------------------------------
+Se voce quiser copiar a URL de transaction mode direto do Supabase em vez de
+trocar o numero na mao:
+
+1. Entra no Supabase: https://supabase.com/dashboard
+2. Abre o projeto:  mvp_agente_ia
+3. No menu, clica em  Settings  (engrenagem) , depois em  Database
+4. Rola ate a secao  Connection pooling  (ou "Connection string")
+5. No seletor de modo, escolhe:  Transaction
+6. Copia a URL que aparece (ela termina com a porta  :6543 )
+7. Coloca a senha do banco no lugar de [YOUR-PASSWORD], se pedir
+8. Cola essa URL inteira no campo DATABASE_URL da Vercel (passos 5 a 9 do
+   "jeito rapido" acima), e faz o Redeploy.
+
+------------------------------------------------------------------------
+POR QUE ISSO RESOLVE
+------------------------------------------------------------------------
+- Porta 5432 = "session mode": cada acesso segura uma conexao aberta. Como a
+  Vercel sobe varios servidores ao mesmo tempo, as conexoes acabam (o teto e 60)
+  e o painel nao consegue mais ler o banco, ficando vazio.
+- Porta 6543 = "transaction mode": muitos acessos DIVIDEM poucas conexoes reais.
+  Nao entope.
+- Nenhum dado se perde nisso, e so o "encanamento" das conexoes.
+
+Arquivo gerado em 07/08/2026.
+========================================================================
+
+
+========================================================================
+NOVO (27/08/2026): VARIAVEL DO BANCO DE RESERVAS
+========================================================================
+A "Visao geral" do Gramado Plazza agora le as RESERVAS direto do banco do
+restaurante (Neon), sem copiar dado nenhum. Pra isso funcionar em producao,
+a Vercel precisa de UMA variavel nova.
+
+NOME:   RESERVAS_DATABASE_URL
+VALOR:  a string de conexao do banco de reservas (postgresql://...neon.tech/...)
+        ⚠️ O VALOR NAO ESTA ESCRITO NESTE ARQUIVO DE PROPOSITO.
+        Ele mora em /opt/gastaomatos/luana/.env.reservas (permissao 600) e
+        no .env.local do projeto. Copie de la, nunca de um print ou mensagem.
+
+OPCIONAL: RESERVAS_AGENT_SLUG  (padrao "gramadoplazza")
+        So mexa se outro cliente passar a ter banco de reservas proprio.
+
+PASSO A PASSO
+1. Vercel > projeto mvp_agente_ia > Settings > Environment Variables
+2. Add New
+3. Name: RESERVAS_DATABASE_URL
+4. Value: cola a string de conexao
+5. Marca os 3 ambientes (Production, Preview, Development)
+6. Save
+7. Deployments > 3 pontinhos do ultimo deploy > Redeploy
+
+SE VOCE NAO FIZER ISSO: o painel NAO quebra. O codigo devolve null e a secao
+de reservas simplesmente nao aparece, e a tela volta ao funil antigo. Ou seja,
+sem risco: so nao mostra o numero.
+
+⚠️ ESSE BANCO E A PRODUCAO DO RESTAURANTE. O codigo so faz SELECT, nunca
+escreve. Se algum dia alguem for mexer nisso, manter essa regra.

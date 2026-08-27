@@ -20,9 +20,11 @@ import {
 } from "lucide-react";
 import { assertAgentAccess, getSessionEmail } from "@/lib/access";
 import { isSuperAdmin } from "@/lib/admin";
-import { getDashboard, type DashboardData, type Period } from "@/lib/queries";
+import { getDashboard, type DashboardData } from "@/lib/queries";
+import { parsePeriod, todayLocal, type Period } from "@/lib/periodo";
 import { PageWrapper } from "@/components/page-wrapper";
 import { KpiCard } from "@/components/kpi";
+import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, Badge } from "@/components/ui";
 import { ChannelIcon } from "@/components/channel-icon";
 import {
@@ -39,15 +41,10 @@ import {
   platformLabel,
   channelLabel,
   timeAgo,
+  formatReais,
 } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
-
-const PERIODS: { key: Period; label: string }[] = [
-  { key: "today", label: "Hoje" },
-  { key: "7d", label: "7 dias" },
-  { key: "30d", label: "30 dias" },
-];
 
 export default async function OverviewPage({
   params,
@@ -62,10 +59,10 @@ export default async function OverviewPage({
   const agent = await assertAgentAccess(slug);
   const basePath = `/org/${org}/${slug}`;
 
-  const period: Period = p === "today" || p === "30d" ? p : "7d";
+  const period: Period = parsePeriod(p);
 
   const d = await getDashboard(slug, period);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayLocal();   // ⚠️ fuso do cliente, não UTC
   // Custo de IA é informação do dono (super admin). Cliente não vê.
   const canSeeCost = isSuperAdmin(await getSessionEmail());
 
@@ -106,26 +103,14 @@ export default async function OverviewPage({
   );
 }
 
+/**
+ * O seletor de período. Era um trio de botões fixos (Hoje / 7 / 30 dias) e
+ * virou calendário de dois meses com presets, a pedido dele em 26/08:
+ * "coloque um seletor de datas melhor, estilo o Google Ads, com dois meses e
+ * as datas específicas".
+ */
 function PeriodTabs({ basePath, period }: { basePath: string; period: Period }) {
-  return (
-    <div className="flex w-full rounded-lg border border-border bg-surface-2/60 p-0.5 text-xs font-medium sm:w-auto">
-      {PERIODS.map((it) => {
-        const active = it.key === period;
-        return (
-          <Link
-            key={it.key}
-            href={`${basePath}?p=${it.key}`}
-            scroll={false}
-            className={`flex-1 rounded-md px-4 py-1.5 text-center transition-colors sm:flex-none ${
-              active ? "brand-gradient text-white" : "text-muted hover:text-fg"
-            }`}
-          >
-            {it.label}
-          </Link>
-        );
-      })}
-    </div>
-  );
+  return <DateRangePicker period={period} basePath={basePath} />;
 }
 
 /* ---- 1. KPIs ---- */
@@ -139,26 +124,62 @@ function KpiRow({ d, canSeeCost }: { d: DashboardData; canSeeCost: boolean }) {
   const custoPorConversa =
     d.conversas.current > 0 ? d.custoUsd.current / d.conversas.current : 0;
 
+  // ⚠️ Restaurante: a taxa que importa é conversa -> RESERVA, não lead ->
+  // conversa (lead de formulário não existe no clique-pra-WhatsApp). Pedido
+  // dele em 26/08: "com isso teríamos a métrica da taxa de conversão entre
+  // conversa iniciada e reserva".
+  const r = d.reservas;
+  const taxaResCur =
+    r && d.conversas.current > 0 ? (r.feitas / d.conversas.current) * 100 : 0;
+  const taxaResPrev =
+    r && d.conversas.previous > 0
+      ? (r.feitasAnterior / d.conversas.previous) * 100
+      : 0;
+
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
-      <KpiCard
-        label={d.sourceKind === "outreach" ? "Taxa de resposta" : "Taxa de conversa"}
-        value={formatPct(taxaCur)}
-        icon={<Target className="size-4" />}
-        featured
-        delta={pctDelta(taxaCur, taxaPrev)}
-        hint={`${formatNumber(d.conversaram.current)} de ${formatNumber(
-          d.leads.current,
-        )} ${d.labels.leads.toLowerCase()}`}
-      />
-      <KpiCard
-        label={d.labels.leads}
-        value={formatNumber(d.leads.current)}
-        icon={<Users className="size-4" />}
-        tone="secondary"
-        delta={pctDelta(d.leads.current, d.leads.previous)}
-        hint={`${formatNumber(d.leadsToday)} hoje`}
-      />
+      {r ? (
+        <KpiCard
+          label="Taxa de reserva"
+          value={formatPct(taxaResCur, 1)}
+          icon={<Target className="size-4" />}
+          featured
+          delta={pctDelta(taxaResCur, taxaResPrev)}
+          hint={`${formatNumber(r.feitas)} de ${formatNumber(
+            d.conversas.current,
+          )} conversas`}
+        />
+      ) : (
+        <KpiCard
+          label={d.sourceKind === "outreach" ? "Taxa de resposta" : "Taxa de conversa"}
+          value={formatPct(taxaCur)}
+          icon={<Target className="size-4" />}
+          featured
+          delta={pctDelta(taxaCur, taxaPrev)}
+          hint={`${formatNumber(d.conversaram.current)} de ${formatNumber(
+            d.leads.current,
+          )} ${d.labels.leads.toLowerCase()}`}
+        />
+      )}
+      {r ? (
+        <KpiCard
+          label="Reservas"
+          value={formatNumber(r.feitas)}
+          icon={<CalendarClock className="size-4" />}
+          tone="secondary"
+          delta={pctDelta(r.feitas, r.feitasAnterior)}
+          hint={`${formatNumber(r.pessoas)} pessoas · ${formatReais(r.receita)}`}
+        />
+      ) : (
+        <KpiCard
+          label={d.labels.leads}
+          value={formatNumber(d.leads.current)}
+          icon={<Users className="size-4" />}
+          tone="secondary"
+          delta={pctDelta(d.leads.current, d.leads.previous)}
+          hint={`${formatNumber(d.leadsToday)} hoje`}
+        />
+      )}
       <KpiCard
         label="Conversas"
         value={formatNumber(d.conversas.current)}
@@ -166,6 +187,17 @@ function KpiRow({ d, canSeeCost }: { d: DashboardData; canSeeCost: boolean }) {
         tone="violet"
         delta={pctDelta(d.conversas.current, d.conversas.previous)}
       />
+      {r ? (
+        <KpiCard
+          label="Receita realizada"
+          value={formatReais(r.realizada.receita)}
+          icon={<DollarSign className="size-4" />}
+          tone="accent"
+          hint={`${formatNumber(r.realizada.mesas)} mesas · ${formatNumber(
+            r.realizada.pessoas,
+          )} pessoas que sentaram`}
+        />
+      ) : null}
       <KpiCard
         label="Ativas (24h)"
         value={formatNumber(d.conversasAtivas)}
@@ -184,13 +216,29 @@ function KpiRow({ d, canSeeCost }: { d: DashboardData; canSeeCost: boolean }) {
           hint={`${formatBRL(custoPorConversa)} / conversa`}
         />
       ) : null}
-      <KpiCard
-        label="CPL"
-        value="—"
-        icon={<CalendarClock className="size-4" />}
-        tone="primary"
-        hint="em breve (custo Meta)"
-      />
+      {r ? (
+        <KpiCard
+          label="Compareceram"
+          value={formatNumber(r.compareceram)}
+          icon={<Users className="size-4" />}
+          tone="primary"
+          hint={
+            r.canceladas + r.naoCompareceram > 0
+              ? `${formatNumber(r.canceladas)} cancelaram · ${formatNumber(
+                  r.naoCompareceram,
+                )} não vieram`
+              : `${formatNumber(r.pendentes)} ainda por vir`
+          }
+        />
+      ) : (
+        <KpiCard
+          label="CPL"
+          value="—"
+          icon={<CalendarClock className="size-4" />}
+          tone="primary"
+          hint="em breve (custo Meta)"
+        />
+      )}
     </div>
   );
 }
@@ -210,7 +258,37 @@ function FunnelSection({ d }: { d: DashboardData }) {
         { label: "Engajaram", value: 0, color: "bg-success", soon: true },
         { label: "Agendaram", value: 0, color: "bg-muted-2", soon: true },
       ]
-    : [
+    : d.reservas
+      ? // ⚠️ Restaurante (clique-pra-WhatsApp): NÃO existe "lead" de formulário,
+        // a pessoa cai direto na conversa. Por isso o topo do funil é a CONVERSA.
+        // Era esse o motivo de a tela do Gramado mostrar "Leads: 0" pra sempre.
+        [
+          {
+            label: "Conversas iniciadas",
+            value: d.conversas.current,
+            color: "bg-secondary",
+            soon: false,
+          },
+          {
+            label: "Engajaram (4+ msgs)",
+            value: d.engajaram,
+            color: "bg-accent-2",
+            soon: false,
+          },
+          {
+            label: "Reservaram",
+            value: d.reservas.feitas,
+            color: "bg-success",
+            soon: false,
+          },
+          {
+            label: "Compareceram",
+            value: d.reservas.compareceram,
+            color: "bg-accent",
+            soon: false,
+          },
+        ]
+      : [
         { label: d.labels.leads, value: d.leads.current, color: "bg-secondary", soon: false },
         {
           label: d.labels.conversaram,
@@ -236,7 +314,9 @@ function FunnelSection({ d }: { d: DashboardData }) {
         subtitle={
           isOutreach
             ? "Do disparo à resposta do lead"
-            : "Do lead capturado ao agendamento"
+            : d.reservas
+              ? "Da conversa iniciada à mesa ocupada"
+              : "Do lead capturado ao agendamento"
         }
       />
       <div className="mt-4 space-y-2.5">

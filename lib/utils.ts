@@ -121,6 +121,21 @@ export function formatBRL(usd: number | string | null | undefined): string {
   }).format(n);
 }
 
+/**
+ * Reais que JÁ SÃO reais. Diferente de formatBRL, que recebe dólar e converte:
+ * a receita das reservas vem em BRL do banco do restaurante, e passar ela pelo
+ * formatBRL multiplicaria por 5,4.
+ */
+export function formatReais(v: number | string | null | undefined): string {
+  const n = Number(v ?? 0);
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: n >= 1000 ? 0 : 2,
+    maximumFractionDigits: n >= 1000 ? 0 : 2,
+  }).format(n);
+}
+
 /** Delta percentual entre atual e anterior. null quando não há base. */
 export function pctDelta(
   current: number,
