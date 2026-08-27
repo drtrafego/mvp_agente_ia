@@ -46,6 +46,13 @@ export default async function DiagReservasPage({
       valor: d.envUsada ?? "NENHUMA das acima existe neste ambiente",
       ok: Boolean(d.envUsada),
     },
+    {
+      rotulo: "Variáveis parecidas neste ambiente",
+      valor: d.parecidas.length
+        ? d.parecidas.join(", ")
+        : "NENHUMA variável com RESERVA, GRAMADO ou NEON no nome",
+      ok: d.parecidas.length > 0 ? null : false,
+    },
     { rotulo: "Host do banco", valor: d.host ?? "—", ok: null },
     {
       rotulo: "Conectou e leu?",
