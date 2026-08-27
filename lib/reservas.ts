@@ -182,11 +182,17 @@ export async function getReservas(
         where (created_at at time zone 'UTC') >= ${prevStart}
           and (created_at at time zone 'UTC') <  ${prevEnd}
       `,
-      sql<{ day: string; n: string }[]>`
+      // ⚠️ `day` é PALAVRA RESERVADA no Postgres: usar como alias sem AS dá
+      // "syntax error at or near day". E como as quatro consultas rodam num
+      // Promise.all, essa sozinha derrubava TODAS, caía no catch e a tela
+      // voltava ao funil antigo sem explicar nada. Foi o último dos três
+      // problemas da madrugada de 27/08, e o mais escondido: a página de
+      // diagnóstico dizia "conectou e leu", porque ela só fazia count(*).
+      sql<{ dia: string; n: string }[]>`
         select to_char(
                  date(created_at at time zone 'UTC' at time zone 'America/Sao_Paulo'),
-                 'YYYY-MM-DD') day,
-               count(*) n
+                 'YYYY-MM-DD') as dia,
+               count(*) as n
         from public.reservas
         where (created_at at time zone 'UTC') >= ${curStart}
           and (created_at at time zone 'UTC') <  ${curEnd}
@@ -215,7 +221,7 @@ export async function getReservas(
       compareceram: Number(atual?.compareceram ?? 0),
       naoCompareceram: Number(atual?.nao_compareceram ?? 0),
       pendentes: Number(atual?.pendentes ?? 0),
-      porDia: dias.map((d) => ({ day: d.day, reservas: Number(d.n) })),
+      porDia: dias.map((d) => ({ day: d.dia, reservas: Number(d.n) })),
       realizada: {
         receita: Number(real?.receita ?? 0),
         mesas: Number(real?.mesas ?? 0),
