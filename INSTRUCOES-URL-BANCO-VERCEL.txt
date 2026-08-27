@@ -65,14 +65,20 @@ A "Visao geral" do Gramado Plazza agora le as RESERVAS direto do banco do
 restaurante (Neon), sem copiar dado nenhum. Pra isso funcionar em producao,
 a Vercel precisa de UMA variavel nova.
 
-NOME:   RESERVAS_DATABASE_URL
+NOME:   RESERVAS_DATABASE_GRAMADO
 VALOR:  a string de conexao do banco de reservas (postgresql://...neon.tech/...)
         ⚠️ O VALOR NAO ESTA ESCRITO NESTE ARQUIVO DE PROPOSITO.
         Ele mora em /opt/gastaomatos/luana/.env.reservas (permissao 600) e
         no .env.local do projeto. Copie de la, nunca de um print ou mensagem.
 
-OPCIONAL: RESERVAS_AGENT_SLUG  (padrao "gramadoplazza")
-        So mexa se outro cliente passar a ter banco de reservas proprio.
+⚠️ O NOME TEM O CLIENTE NO FIM, e isso e de proposito (escolha do Gastao em
+   27/08). Um segundo cliente com reservas ganha a sua propria variavel
+   (RESERVAS_DATABASE_<CLIENTE>), sem ambiguidade e sem dividir conexao.
+   O codigo tambem aceita RESERVAS_DATABASE_GRAMADOPLAZZA e o generico
+   RESERVAS_DATABASE_URL, nessa ordem, entao qualquer um dos tres funciona.
+
+CLIENTE NOVO COM RESERVAS: e UMA LINHA no ENV_POR_SLUG de lib/reservas.ts,
+mais a variavel na Vercel. Nada alem disso.
 
 PASSO A PASSO
 1. Vercel > projeto mvp_agente_ia > Settings > Environment Variables

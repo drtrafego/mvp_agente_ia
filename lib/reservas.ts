@@ -15,33 +15,61 @@ import { resolveRange, type Period } from "./periodo";
  * outro slug devolve null e a tela some com a seção, sem quebrar.
  */
 
-const globalForReservas = globalThis as unknown as {
-  sqlReservas?: ReturnType<typeof postgres>;
+/**
+ * Qual variável de ambiente guarda o banco de cada cliente.
+ *
+ * ⚠️ Nome escolhido pelo Gastão (27/08): *"coloca na variável assim
+ * RESERVAS_DATABASE_GRAMADO"*. Ele tem razão e é melhor que o genérico: no dia
+ * em que um segundo cliente tiver banco de reservas, `RESERVAS_DATABASE_URL`
+ * viraria ambiguidade.
+ *
+ * **Cliente novo com reservas = uma linha aqui.** Nada mais no código.
+ * A ordem importa: o primeiro nome que existir no ambiente é o que vale.
+ */
+const ENV_POR_SLUG: Record<string, string[]> = {
+  gramadoplazza: [
+    "RESERVAS_DATABASE_GRAMADO",
+    "RESERVAS_DATABASE_GRAMADOPLAZZA",
+    "RESERVAS_DATABASE_URL", // genérico, mantido por compatibilidade
+  ],
 };
 
-/** Slug do agente que usa este banco. Configurável por env. */
-export function slugComReservas(): string {
-  return process.env.RESERVAS_AGENT_SLUG || "gramadoplazza";
+/** A conexão configurada pra este agente, ou null se não tem banco de reservas. */
+function urlDoAgente(slug: string): string | null {
+  for (const nome of ENV_POR_SLUG[slug] ?? []) {
+    const v = process.env[nome];
+    if (v) return v;
+  }
+  return null;
 }
 
 export function temReservas(slug: string): boolean {
-  return Boolean(process.env.RESERVAS_DATABASE_URL) && slug === slugComReservas();
+  return Boolean(urlDoAgente(slug));
 }
 
-function conn() {
-  if (!globalForReservas.sqlReservas) {
-    const url = process.env.RESERVAS_DATABASE_URL;
-    if (!url) throw new Error("RESERVAS_DATABASE_URL não configurada");
-    globalForReservas.sqlReservas = postgres(url, {
+/** Agentes que têm banco de reservas configurado neste ambiente. */
+export function agentesComReservas(): string[] {
+  return Object.keys(ENV_POR_SLUG).filter((s) => temReservas(s));
+}
+
+// uma conexão por agente: dois clientes com reserva não podem dividir pool
+const pools = new Map<string, ReturnType<typeof postgres>>();
+
+function conn(slug: string) {
+  const existente = pools.get(slug);
+  if (existente) return existente;
+  const url = urlDoAgente(slug);
+  if (!url) throw new Error(`sem banco de reservas configurado para ${slug}`);
+  const novo = postgres(url, {
       ssl: "require",
       max: 3,
       idle_timeout: 20,
       connect_timeout: 10,
-      // trava de segurança: esta conexão é só de leitura
-      connection: { application_name: "painel-agentes-leitura" },
-    });
-  }
-  return globalForReservas.sqlReservas;
+    // trava de segurança: esta conexão é só de leitura
+    connection: { application_name: "painel-agentes-leitura" },
+  });
+  pools.set(slug, novo);
+  return novo;
 }
 
 export type ReservasResumo = {
@@ -84,7 +112,7 @@ export async function getReservas(
   if (!temReservas(slug)) return null;
 
   const { from, to, curStart, curEnd, prevStart, prevEnd } = resolveRange(period);
-  const sql = conn();
+  const sql = conn(slug);
 
   try {
     const [[atual], [anterior], dias, [real]] = await Promise.all([
