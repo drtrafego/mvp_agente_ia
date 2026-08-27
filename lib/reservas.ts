@@ -26,6 +26,30 @@ import { resolveRange, type Period } from "./periodo";
  * **Cliente novo com reservas = uma linha aqui.** Nada mais no código.
  * A ordem importa: o primeiro nome que existir no ambiente é o que vale.
  */
+/**
+ * ‼️ AS VARIÁVEIS PRECISAM SER LIDAS DE FORMA **ESTÁTICA**
+ * (`process.env.NOME`), nunca por índice (`process.env[nome]`).
+ *
+ * Isto custou uma hora na madrugada de 27/08. A variável estava cadastrada
+ * certa, em Production, e o Gastão fez Redeploy DUAS vezes: mesmo assim o
+ * código dizia "nenhuma variável encontrada". O motivo é que o Next/Vercel
+ * resolve `process.env.NOME` em tempo de build por análise estática do código;
+ * um acesso por índice, com o nome vindo de uma variável, é invisível pra essa
+ * análise, e a env simplesmente não chega no bundle da função.
+ *
+ * `DATABASE_URL` sempre funcionou justamente porque `lib/db.ts` lê ela assim,
+ * direto pelo nome.
+ *
+ * ⚠️ REGRA PRA CLIENTE NOVO: além de acrescentar o slug em ENV_POR_SLUG,
+ * é OBRIGATÓRIO acrescentar a linha correspondente em LIDAS. Sem isso, o
+ * cadastro na Vercel não adianta.
+ */
+const LIDAS: Record<string, string | undefined> = {
+  RESERVAS_DATABASE_GRAMADO: process.env.RESERVAS_DATABASE_GRAMADO,
+  RESERVAS_DATABASE_GRAMADOPLAZZA: process.env.RESERVAS_DATABASE_GRAMADOPLAZZA,
+  RESERVAS_DATABASE_URL: process.env.RESERVAS_DATABASE_URL,
+};
+
 const ENV_POR_SLUG: Record<string, string[]> = {
   gramadoplazza: [
     "RESERVAS_DATABASE_GRAMADO",
@@ -37,7 +61,7 @@ const ENV_POR_SLUG: Record<string, string[]> = {
 /** A conexão configurada pra este agente, ou null se não tem banco de reservas. */
 function urlDoAgente(slug: string): string | null {
   for (const nome of ENV_POR_SLUG[slug] ?? []) {
-    const v = process.env[nome];
+    const v = LIDAS[nome];
     if (v) return v;
   }
   return null;
@@ -214,7 +238,7 @@ export async function getReservas(
 
 /** Qual variável foi encontrada pra este agente. Só pra diagnóstico/log. */
 export function envUsada(slug: string): string | null {
-  return (ENV_POR_SLUG[slug] ?? []).find((n) => process.env[n]) ?? null;
+  return (ENV_POR_SLUG[slug] ?? []).find((n) => LIDAS[n]) ?? null;
 }
 
 export type DiagReservas = {
@@ -240,12 +264,12 @@ export type DiagReservas = {
  */
 export async function diagnosticoReservas(slug: string): Promise<DiagReservas> {
   const nomesEsperados = ENV_POR_SLUG[slug] ?? [];
-  const envUsada = nomesEsperados.find((n) => process.env[n]) ?? null;
+  const envUsada = nomesEsperados.find((n) => LIDAS[n]) ?? null;
 
   let host: string | null = null;
   if (envUsada) {
     try {
-      host = new URL(process.env[envUsada] as string).host;
+      host = new URL(LIDAS[envUsada] as string).host;
     } catch {
       host = "(valor não parece uma URL de conexão válida)";
     }
@@ -261,6 +285,8 @@ export async function diagnosticoReservas(slug: string): Promise<DiagReservas> {
     // a variável existe mas com o nome ligeiramente diferente (typo, hífen no
     // lugar de underline, RESERVA sem S). Sem isto, "não achei" e "achei com
     // outro nome" são indistinguíveis, e foi exatamente onde travamos.
+    // ⚠️ isto lista o que o PROCESSO enxerga. Com o acesso estático de LIDAS,
+    // uma variável cadastrada mas não declarada lá em cima não aparece aqui.
     parecidas: Object.keys(process.env)
       .filter((k) => /RESERV|GRAMADO|NEON/i.test(k))
       .sort(),
