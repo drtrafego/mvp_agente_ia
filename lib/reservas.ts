@@ -224,6 +224,8 @@ export type DiagReservas = {
   envUsada: string | null;
   /** Host do banco, sem usuário e sem senha. Só pra confirmar que é o certo. */
   host: string | null;
+  /** Nomes (só nomes) de env que lembram reservas/gramado/neon neste ambiente. */
+  parecidas: string[];
   totalReservas: number | null;
   erro: string | null;
 };
@@ -255,6 +257,13 @@ export async function diagnosticoReservas(slug: string): Promise<DiagReservas> {
     nomesEsperados,
     envUsada,
     host,
+    // ⚠️ SÓ OS NOMES, nunca os valores. Serve pra pegar o caso mais chato:
+    // a variável existe mas com o nome ligeiramente diferente (typo, hífen no
+    // lugar de underline, RESERVA sem S). Sem isto, "não achei" e "achei com
+    // outro nome" são indistinguíveis, e foi exatamente onde travamos.
+    parecidas: Object.keys(process.env)
+      .filter((k) => /RESERV|GRAMADO|NEON/i.test(k))
+      .sort(),
     totalReservas: null,
     erro: envUsada ? null : "nenhuma variável de ambiente encontrada",
   };
