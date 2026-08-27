@@ -1053,8 +1053,25 @@ export async function unblockAgendaDate(
 
 // Follow-up CONTEXTUAL: a Nina escreve cada lembrete lendo a conversa.
 // O dashboard só define QUANDO (os tempos) e o on/off.
-export type FollowupStep = { delayMinutes: number };
-export type FollowupConfig = { enabled: boolean; steps: FollowupStep[] };
+// Tipos, defaults e helpers do follow-up moram em `lib/followup.ts`: este
+// arquivo é "use server" e só pode exportar função async (constante e type
+// guard quebram o build). Aqui só reexporto os TIPOS, que somem na compilação.
+import {
+  FOLLOWUP_DEFAULT_WINDOW,
+  FOLLOWUP_DEFAULT_SPACING,
+  type FollowupStep,
+  type FollowupWindow,
+  type FollowupSpacing,
+  type FollowupConfig,
+} from "@/lib/followup";
+
+export type {
+  FollowupStep,
+  FollowupWindow,
+  FollowupSpacing,
+  FollowupConfig,
+} from "@/lib/followup";
+
 
 const DEFAULT_FOLLOWUP_STEPS: FollowupStep[] = [
   { delayMinutes: 30 },
@@ -1073,6 +1090,17 @@ async function ensureFollowupTables(): Promise<void> {
        updated_at timestamptz default now()
      )`,
   );
+  // Colunas acrescentadas em 26/08 (janela, espaçamento e régua por origem).
+  // `add column if not exists` mantém compatível com quem já tinha a tabela.
+  for (const col of [
+    "send_window jsonb",
+    "spacing jsonb",
+    "steps_by_origin jsonb",
+  ]) {
+    await sql.unsafe(
+      `alter table public.followup_config add column if not exists ${col}`,
+    );
+  }
   await sql.unsafe(
     `create table if not exists public.followup_sent (
        id text primary key,
@@ -1092,16 +1120,49 @@ async function ensureFollowupTables(): Promise<void> {
 
 function sanitizeSteps(steps: unknown): FollowupStep[] {
   if (!Array.isArray(steps)) return [];
-  const seen = new Set<number>();
-  const out: FollowupStep[] = [];
+  const vistos = new Set<string>();
+  const porTempo: { delayMinutes: number }[] = [];
+  const noDiaSeguinte: { nextDayAtHour: number }[] = [];
   for (const s of steps) {
-    const o = (s ?? {}) as { delayMinutes?: unknown };
+    const o = (s ?? {}) as { delayMinutes?: unknown; nextDayAtHour?: unknown };
+    if (o.nextDayAtHour !== undefined && o.nextDayAtHour !== null) {
+      const h = Math.round(Number(o.nextDayAtHour));
+      if (!Number.isFinite(h) || h < 0 || h > 23) continue;
+      const chave = `d:${h}`;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      noDiaSeguinte.push({ nextDayAtHour: h });
+      continue;
+    }
     const delayMinutes = Math.max(1, Math.round(Number(o.delayMinutes) || 0));
-    if (delayMinutes <= 0 || seen.has(delayMinutes)) continue;
-    seen.add(delayMinutes);
-    out.push({ delayMinutes });
+    if (delayMinutes <= 0) continue;
+    const chave = `m:${delayMinutes}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    porTempo.push({ delayMinutes });
   }
-  return out.sort((a, b) => a.delayMinutes - b.delayMinutes);
+  porTempo.sort((a, b) => a.delayMinutes - b.delayMinutes);
+  noDiaSeguinte.sort((a, b) => a.nextDayAtHour - b.nextDayAtHour);
+  // os do dia seguinte vêm sempre depois dos do mesmo dia
+  return [...porTempo, ...noDiaSeguinte];
+}
+
+function sanitizeWindow(v: unknown): FollowupWindow | undefined {
+  const o = (v ?? {}) as { startHour?: unknown; endHour?: unknown };
+  const ini = Math.round(Number(o.startHour));
+  const fim = Math.round(Number(o.endHour));
+  if (!Number.isFinite(ini) || !Number.isFinite(fim)) return undefined;
+  if (ini < 0 || ini > 23 || fim < 1 || fim > 24 || ini >= fim) return undefined;
+  return { startHour: ini, endHour: fim };
+}
+
+function sanitizeSpacing(v: unknown): FollowupSpacing | undefined {
+  const o = (v ?? {}) as { minSeconds?: unknown; maxSeconds?: unknown };
+  const min = Math.round(Number(o.minSeconds));
+  const max = Math.round(Number(o.maxSeconds));
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return undefined;
+  if (min < 5 || max > 3600 || min > max) return undefined;
+  return { minSeconds: min, maxSeconds: max };
 }
 
 export async function getFollowupConfig(
@@ -1110,14 +1171,23 @@ export async function getFollowupConfig(
   const fallback: FollowupConfig = {
     enabled: false,
     steps: DEFAULT_FOLLOWUP_STEPS,
+    window: FOLLOWUP_DEFAULT_WINDOW,
+    spacing: FOLLOWUP_DEFAULT_SPACING,
   };
   await assertAgentAccess(slug);
   try {
     await ensureFollowupTables();
     const [row] = await sql.unsafe<
-      { enabled: boolean | null; steps: unknown }[]
+      {
+        enabled: boolean | null;
+        steps: unknown;
+        send_window: unknown;
+        spacing: unknown;
+        steps_by_origin: unknown;
+      }[]
     >(
-      `select enabled, steps from public.followup_config where agent_slug = $1 limit 1`,
+      `select enabled, steps, send_window, spacing, steps_by_origin
+         from public.followup_config where agent_slug = $1 limit 1`,
       [slug],
     );
     if (!row) {
@@ -1130,9 +1200,14 @@ export async function getFollowupConfig(
       return fallback;
     }
     const steps = sanitizeSteps(row.steps);
+    const porOrigem = (row.steps_by_origin ?? {}) as { ad?: unknown };
+    const stepsAd = sanitizeSteps(porOrigem.ad);
     return {
       enabled: !!row.enabled,
       steps: steps.length ? steps : DEFAULT_FOLLOWUP_STEPS,
+      window: sanitizeWindow(row.send_window) ?? FOLLOWUP_DEFAULT_WINDOW,
+      spacing: sanitizeSpacing(row.spacing) ?? FOLLOWUP_DEFAULT_SPACING,
+      ...(stepsAd.length ? { stepsByOrigin: { ad: stepsAd } } : {}),
     };
   } catch {
     return fallback;
@@ -1141,26 +1216,54 @@ export async function getFollowupConfig(
 
 export async function saveFollowupConfig(
   slug: string,
-  input: { enabled: boolean; steps: FollowupStep[] },
+  input: {
+    enabled: boolean;
+    steps: FollowupStep[];
+    window?: FollowupWindow;
+    spacing?: FollowupSpacing;
+    stepsByOrigin?: { ad?: FollowupStep[] };
+  },
 ): Promise<ActionResult> {
   const agent = await assertAgentAccess(slug);
   try {
-    if (!getMetaConfig(agent))
-      return { ok: false, error: "Agente sem número de WhatsApp oficial." };
+    // ⚠️ Até 26/08 isto exigia número oficial da Meta e travava a tela.
+    // Não vale mais: o Gramado Plazza atende por uma ponte própria (UazAPI),
+    // sem WhatsApp oficial, e é justamente quem mais precisa dessa config.
+    // A checagem virou aviso: só bloqueia LIGAR o disparo pelo painel, que é
+    // o que de fato depende da API da Meta. Salvar os tempos é sempre
+    // permitido, porque quem dispara pode ser um serviço de fora.
     const steps = sanitizeSteps(input.steps);
+    if (input.enabled && !getMetaConfig(agent))
+      return {
+        ok: false,
+        error:
+          "Este agente não usa o WhatsApp oficial, então o disparo daqui não " +
+          "funciona. Os tempos podem ser salvos: quem envia é o serviço do " +
+          "próprio agente, e ele lê esta configuração.",
+      };
     if (input.enabled && steps.length === 0)
       return {
         ok: false,
         error: "Adicione ao menos um tempo de follow-up.",
       };
 
+    const janela = sanitizeWindow(input.window) ?? FOLLOWUP_DEFAULT_WINDOW;
+    const ritmo = sanitizeSpacing(input.spacing) ?? FOLLOWUP_DEFAULT_SPACING;
+    const stepsAd = sanitizeSteps(input.stepsByOrigin?.ad);
+    const porOrigem = stepsAd.length ? { ad: stepsAd } : {};
+
     await ensureFollowupTables();
     await sql`
-      insert into public.followup_config (agent_slug, enabled, steps, updated_at)
-      values (${slug}, ${input.enabled}, ${sql.json(steps)}, now())
+      insert into public.followup_config
+        (agent_slug, enabled, steps, send_window, spacing, steps_by_origin, updated_at)
+      values (${slug}, ${input.enabled}, ${sql.json(steps)},
+              ${sql.json(janela)}, ${sql.json(ritmo)}, ${sql.json(porOrigem)}, now())
       on conflict (agent_slug) do update set
         enabled = excluded.enabled,
         steps = excluded.steps,
+        send_window = excluded.send_window,
+        spacing = excluded.spacing,
+        steps_by_origin = excluded.steps_by_origin,
         updated_at = now()
     `;
     revalidatePath(agentPath(agent, "/disparos"));
