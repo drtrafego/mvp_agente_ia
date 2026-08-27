@@ -926,6 +926,7 @@ export async function getLeads(slug: string): Promise<Record<Stage, Lead[]>> {
 export type { Period } from "./periodo";
 import { resolveRange, type Period } from "./periodo";
 import { getReservas, type ReservasResumo } from "./reservas";
+import { getFunil, type Funil } from "./funil";
 
 export type Delta = { current: number; previous: number };
 
@@ -934,6 +935,13 @@ export type DashboardSource = "form" | "outreach" | "none";
 export type DashboardData = {
   period: Period;
   sourceKind: DashboardSource;
+  /**
+   * O funil do bot, que É a tela "Visão geral" desde 27/08/2026. Os campos
+   * abaixo (leads, conversaram, engajaram, custoUsd, timeline) sobreviveram
+   * porque ainda alimentam a aba "Origem" e o alerta interno de custo, mas
+   * NÃO são mais o conteúdo da tela. Ver lib/funil.ts.
+   */
+  funil: Funil;
   labels: { leads: string; conversaram: string };
   leads: Delta;
   leadsToday: number;
@@ -1050,6 +1058,14 @@ export async function getDashboard(
   const src = getLeadSource(agent);
   const { curStart, curEnd, prevStart, prevEnd, todayStart } =
     periodRange(period);
+
+  // Reservas moram em OUTRO banco (o do restaurante) e não dependem de nada
+  // daqui: a consulta parte agora e é aguardada lá embaixo, correndo junto com
+  // as do banco do painel em vez de esperar a vez. Agente sem reservas devolve
+  // null na hora, sem tocar em rede.
+  // O .catch é rede de segurança: promessa criada aqui e aguardada só lá
+  // embaixo vira "unhandled rejection" se estourar no meio do caminho.
+  const reservasPromise = getReservas(slug, period).catch(() => null);
 
   // ---------- comum a todas as fontes (conversas do bot) ----------
   const convCount = (a: string, b: string) =>
@@ -1307,7 +1323,63 @@ export async function getDashboard(
         ),
       ]);
   }
-  // 'none': tudo zerado (leads/funil ficam sem dados).
+  // ---- CRM do próprio bot: o contato que chegou DIRETO (WhatsApp/site) ----
+  // Toda origem conta como lead, não só formulário e prospecção. Se o agente
+  // não tem nenhuma das duas, esta vira a fonte principal; se tem, SOMA.
+  // Dedupe por telefone acontece adiante, pra quem chegou por dois caminhos
+  // não contar duas vezes e inflar a taxa de conversão.
+  {
+    const crmLeads = (a: string, b: string) =>
+      scalar(
+        `select count(*)::int v from "${schema}".crm_leads
+         where created_at >= $1 and created_at < $2`,
+        [a, b],
+      );
+    // "conversou" no CRM = o lead tem conversa no bot com resposta dele
+    const crmConversaram = (a: string, b: string) =>
+      scalar(
+        `select count(distinct l.id)::int v
+         from "${schema}".crm_leads l
+         join "${schema}".conversations c
+           on regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') <> ''
+          and regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g')
+              like '%' || right(regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g'), 8) || '%'
+         where l.created_at >= $1 and l.created_at < $2`,
+        [a, b],
+      );
+
+    const [cCur, cPrev, cToday, cvCur, cvPrev, cByDay] = await Promise.all([
+      crmLeads(curStart, curEnd),
+      crmLeads(prevStart, prevEnd),
+      scalar(
+        `select count(*)::int v from "${schema}".crm_leads where created_at >= $1`,
+        [todayStart],
+      ),
+      crmConversaram(curStart, curEnd),
+      crmConversaram(prevStart, prevEnd),
+      rowsSafe<{ day: string; v: number }>(
+        `select to_char(date_trunc('day', created_at), 'YYYY-MM-DD') day, count(*)::int v
+         from "${schema}".crm_leads
+         where created_at >= $1 and created_at < $2 group by 1`,
+        [curStart, curEnd],
+      ),
+    ]);
+
+    if (cCur > 0 || cPrev > 0) {
+      leadsCur += cCur;
+      leadsPrev += cPrev;
+      leadsToday += cToday;
+      conversaramCur += cvCur;
+      conversaramPrev += cvPrev;
+      // funde a série do gráfico, somando o dia que já existir
+      const m = new Map(leadsByDay.map((r) => [r.day, r.v]));
+      for (const r of cByDay) m.set(r.day, (m.get(r.day) ?? 0) + r.v);
+      leadsByDay = [...m].map(([day, v]) => ({ day, v }));
+      // sem formulário nem prospecção, o rótulo certo é o genérico
+      if (src.leadSource === "none") labels = { leads: "Leads", conversaram: "Conversaram" };
+    }
+  }
+
 
   const [avgFirstRespSec, avgMsgs] = await Promise.all([
     (async () => {
@@ -1332,7 +1404,11 @@ export async function getDashboard(
 
   // reservas do restaurante: banco separado, então vai numa ida própria.
   // Nunca derruba a página: se o banco do cliente cair, volta null.
-  const reservas = await getReservas(slug, period);
+  const reservas = await reservasPromise;
+
+  // O funil precisa das reservas já resolvidas (banco separado), por isso vem
+  // depois. Ele NÃO toca em meta_leads: fonte morta não entra na tela.
+  const funil = await getFunil(agent, period, reservas);
 
   const leadsMap = new Map(leadsByDay.map((r) => [r.day, r.v]));
   const convMap = new Map(convByDay.map((r) => [r.day, r.v]));
@@ -1347,6 +1423,7 @@ export async function getDashboard(
   return {
     period,
     sourceKind: src.leadSource,
+    funil,
     labels,
     leads: { current: leadsCur, previous: leadsPrev },
     leadsToday,

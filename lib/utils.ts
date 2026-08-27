@@ -146,7 +146,12 @@ export function pctDelta(
 }
 
 export function formatPct(value: number, digits = 0): string {
-  return `${value.toFixed(digits)}%`;
+  // pt-BR: vírgula decimal. Com digits=0 nada muda; com 1 casa, "30,7%" em vez
+  // do "30.7%" que aparecia na taxa de reserva do Gramado.
+  return `${new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value)}%`;
 }
 
 // ---- Variáveis de template de WhatsApp (campanhas/disparos) ----------

@@ -1,70 +1,83 @@
 import Link from "next/link";
 import {
-  Users,
   MessagesSquare,
-  CalendarClock,
-  Activity,
-  DollarSign,
   Target,
   TrendingUp,
   Trophy,
   Radio,
   Megaphone,
   Timer,
-  MessageSquareDot,
-  Gauge,
-  CheckCircle2,
-  AlertTriangle,
-  XCircle,
+  Activity,
+  ArrowUp,
+  ArrowDown,
+  Minus,
+  TrendingDown,
   ChevronRight,
 } from "lucide-react";
-import { assertAgentAccess, getSessionEmail } from "@/lib/access";
-import { isSuperAdmin } from "@/lib/admin";
+import { assertAgentAccess } from "@/lib/access";
 import { getDashboard, type DashboardData } from "@/lib/queries";
-import { parsePeriod, todayLocal, type Period } from "@/lib/periodo";
+import { maiorPerda, taxaFimAFim, type Funil } from "@/lib/funil";
+import {
+  parsePeriod,
+  serializePeriod,
+  todayLocal,
+  type Period,
+} from "@/lib/periodo";
 import { PageWrapper } from "@/components/page-wrapper";
-import { KpiCard } from "@/components/kpi";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { Card, Badge } from "@/components/ui";
 import { ChannelIcon } from "@/components/channel-icon";
-import {
-  TimelineChart,
-  CategoryDonut,
-  CampaignBars,
-  CostSparkline,
-} from "@/components/charts";
+import { FunilTimeline, CategoryDonut, CampaignBars } from "@/components/charts";
 import {
   formatNumber,
-  formatBRL,
   formatPct,
   pctDelta,
   platformLabel,
   channelLabel,
   timeAgo,
-  formatReais,
+  cn,
 } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * A "Visão geral" É O FUNIL DO BOT. Não é uma lista de cards.
+ *
+ * ⚠️ 27/08/2026. A tela anterior era seis KPIs montados sobre public.meta_leads
+ * (19 linhas na vida inteira) e public.ctwa_referrals (2 linhas na história).
+ * Fonte morta: os quatro bots apareciam zerados e a tela parecia quebrada. As
+ * etapas agora saem de lib/funil.ts, cada uma da fonte que AQUELE bot tem.
+ *
+ * ⚠️ Etapa que o bot NÃO mede não vira zero na tela, some e explica no rodapé.
+ * Zero no lugar de dado inexistente lê como performance ruim.
+ *
+ * O que saiu daqui de propósito, não repor: custo de IA, "Conversaram" e
+ * "Engajaram" como cards soltos (viraram etapas), leads de meta_leads,
+ * campanhas e anúncios no topo (viraram a aba "Origem", que só aparece quando
+ * há dado no período), tempo de 1ª resposta (virou selo) e média de mensagens.
+ */
 export default async function OverviewPage({
   params,
   searchParams,
 }: {
   params: Promise<{ org: string; slug: string }>;
-  searchParams: Promise<{ p?: string }>;
+  searchParams: Promise<{ p?: string; aba?: string }>;
 }) {
   const { org, slug } = await params;
-  const { p } = await searchParams;
+  const { p, aba } = await searchParams;
   // Gate de acesso, alem do gate do layout. Nenhuma consulta acontece antes.
   const agent = await assertAgentAccess(slug);
   const basePath = `/org/${org}/${slug}`;
 
   const period: Period = parsePeriod(p);
-
   const d = await getDashboard(slug, period);
-  const todayStr = todayLocal();   // ⚠️ fuso do cliente, não UTC
-  // Custo de IA é informação do dono (super admin). Cliente não vê.
-  const canSeeCost = isSuperAdmin(await getSessionEmail());
+  const todayStr = todayLocal(); // ⚠️ fuso do cliente, não UTC
+
+  // A aba "Origem" só existe quando há anúncio/campanha no período. Sem dado,
+  // ela nem aparece: aba vazia é promessa quebrada.
+  const temOrigem =
+    d.adRanking.length > 0 || d.topCampaigns.length > 0 || d.byPlatform.length > 0;
+  const abaAtiva = aba === "origem" && temOrigem ? "origem" : "funil";
 
   return (
     <PageWrapper>
@@ -74,320 +87,282 @@ export default async function OverviewPage({
             Visão geral
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Do anúncio à conversa · {agent.name}
+            O funil do {agent.name}, da primeira conversa ao fechamento
           </p>
         </div>
-        <PeriodTabs basePath={basePath} period={period} />
+        <DateRangePicker period={period} basePath={basePath} />
       </div>
 
-      <div className="space-y-5">
-        <KpiRow d={d} canSeeCost={canSeeCost} />
-        <FunnelSection d={d} />
-        <TimelineSection d={d} todayStr={todayStr} />
-        {d.sourceKind === "form" ? (
-          <>
-            <AdRankingSection rows={d.adRanking} />
-            <div className="grid gap-5 lg:grid-cols-2">
-              <PlatformSection d={d} />
-              <CampaignSection d={d} />
-            </div>
-          </>
-        ) : d.sourceKind === "outreach" ? (
-          <OutreachChannelSection d={d} />
-        ) : null}
-        <BotHealthSection d={d} canSeeCost={canSeeCost} />
-        <InsightsSection d={d} canSeeCost={canSeeCost} />
-        <RecentSection basePath={basePath} rows={d.recent} />
-      </div>
+      {temOrigem ? (
+        <Abas basePath={basePath} period={period} ativa={abaAtiva} />
+      ) : null}
+
+      {abaAtiva === "funil" ? (
+        <div className="space-y-5">
+          <ResumoSection funil={d.funil} />
+          <FunilSection d={d} />
+          <EvolucaoSection funil={d.funil} todayStr={todayStr} />
+          <RecentSection basePath={basePath} rows={d.recent} />
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <AdRankingSection rows={d.adRanking} />
+          <div className="grid gap-5 lg:grid-cols-2">
+            <PlatformSection d={d} />
+            <CampaignSection d={d} />
+          </div>
+        </div>
+      )}
     </PageWrapper>
   );
 }
 
-/**
- * O seletor de período. Era um trio de botões fixos (Hoje / 7 / 30 dias) e
- * virou calendário de dois meses com presets, a pedido dele em 26/08:
- * "coloque um seletor de datas melhor, estilo o Google Ads, com dois meses e
- * as datas específicas".
- */
-function PeriodTabs({ basePath, period }: { basePath: string; period: Period }) {
-  return <DateRangePicker period={period} basePath={basePath} />;
-}
-
-/* ---- 1. KPIs ---- */
-function KpiRow({ d, canSeeCost }: { d: DashboardData; canSeeCost: boolean }) {
-  const taxaCur =
-    d.leads.current > 0 ? (d.conversaram.current / d.leads.current) * 100 : 0;
-  const taxaPrev =
-    d.leads.previous > 0
-      ? (d.conversaram.previous / d.leads.previous) * 100
-      : 0;
-  const custoPorConversa =
-    d.conversas.current > 0 ? d.custoUsd.current / d.conversas.current : 0;
-
-  // ⚠️ Restaurante: a taxa que importa é conversa -> RESERVA, não lead ->
-  // conversa (lead de formulário não existe no clique-pra-WhatsApp). Pedido
-  // dele em 26/08: "com isso teríamos a métrica da taxa de conversão entre
-  // conversa iniciada e reserva".
-  const r = d.reservas;
-  const taxaResCur =
-    r && d.conversas.current > 0 ? (r.feitas / d.conversas.current) * 100 : 0;
-  const taxaResPrev =
-    r && d.conversas.previous > 0
-      ? (r.feitasAnterior / d.conversas.previous) * 100
-      : 0;
-
+/* ---- abas ---- */
+function Abas({
+  basePath,
+  period,
+  ativa,
+}: {
+  basePath: string;
+  period: Period;
+  ativa: "funil" | "origem";
+}) {
+  const q = `p=${encodeURIComponent(serializePeriod(period))}`;
+  const item = (key: "funil" | "origem", label: string) => (
+    <Link
+      href={`${basePath}?${q}${key === "origem" ? "&aba=origem" : ""}`}
+      scroll={false}
+      className={cn(
+        "rounded-lg px-3.5 py-1.5 text-sm font-medium transition-colors duration-200",
+        ativa === key
+          ? "bg-surface-3 text-fg"
+          : "text-muted hover:bg-surface-2 hover:text-fg",
+      )}
+    >
+      {label}
+    </Link>
+  );
   return (
-    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
-      {r ? (
-        <KpiCard
-          label="Taxa de reserva"
-          value={formatPct(taxaResCur, 1)}
-          icon={<Target className="size-4" />}
-          featured
-          delta={pctDelta(taxaResCur, taxaResPrev)}
-          hint={`${formatNumber(r.feitas)} de ${formatNumber(
-            d.conversas.current,
-          )} conversas`}
-        />
-      ) : (
-        <KpiCard
-          label={d.sourceKind === "outreach" ? "Taxa de resposta" : "Taxa de conversa"}
-          value={formatPct(taxaCur)}
-          icon={<Target className="size-4" />}
-          featured
-          delta={pctDelta(taxaCur, taxaPrev)}
-          hint={`${formatNumber(d.conversaram.current)} de ${formatNumber(
-            d.leads.current,
-          )} ${d.labels.leads.toLowerCase()}`}
-        />
-      )}
-      {r ? (
-        <KpiCard
-          label="Reservas"
-          value={formatNumber(r.feitas)}
-          icon={<CalendarClock className="size-4" />}
-          tone="secondary"
-          delta={pctDelta(r.feitas, r.feitasAnterior)}
-          hint={`${formatNumber(r.pessoas)} pessoas · ${formatReais(r.receita)}`}
-        />
-      ) : (
-        <KpiCard
-          label={d.labels.leads}
-          value={formatNumber(d.leads.current)}
-          icon={<Users className="size-4" />}
-          tone="secondary"
-          delta={pctDelta(d.leads.current, d.leads.previous)}
-          hint={`${formatNumber(d.leadsToday)} hoje`}
-        />
-      )}
-      <KpiCard
-        label="Conversas"
-        value={formatNumber(d.conversas.current)}
-        icon={<MessagesSquare className="size-4" />}
-        tone="violet"
-        delta={pctDelta(d.conversas.current, d.conversas.previous)}
-      />
-      {r ? (
-        <KpiCard
-          label="Receita realizada"
-          value={formatReais(r.realizada.receita)}
-          icon={<DollarSign className="size-4" />}
-          tone="accent"
-          hint={`${formatNumber(r.realizada.mesas)} mesas · ${formatNumber(
-            r.realizada.pessoas,
-          )} pessoas que sentaram`}
-        />
-      ) : null}
-      <KpiCard
-        label="Ativas (24h)"
-        value={formatNumber(d.conversasAtivas)}
-        icon={<Activity className="size-4" />}
-        tone="success"
-        hint="com mensagem recente"
-      />
-      {canSeeCost ? (
-        <KpiCard
-          label="Custo de IA"
-          value={formatBRL(d.custoUsd.current)}
-          icon={<DollarSign className="size-4" />}
-          tone="accent"
-          delta={pctDelta(d.custoUsd.current, d.custoUsd.previous)}
-          deltaInvert
-          hint={`${formatBRL(custoPorConversa)} / conversa`}
-        />
-      ) : null}
-      {r ? (
-        <KpiCard
-          label="Compareceram"
-          value={formatNumber(r.compareceram)}
-          icon={<Users className="size-4" />}
-          tone="primary"
-          hint={
-            r.canceladas + r.naoCompareceram > 0
-              ? `${formatNumber(r.canceladas)} cancelaram · ${formatNumber(
-                  r.naoCompareceram,
-                )} não vieram`
-              : `${formatNumber(r.pendentes)} ainda por vir`
-          }
-        />
-      ) : (
-        <KpiCard
-          label="CPL"
-          value="—"
-          icon={<CalendarClock className="size-4" />}
-          tone="primary"
-          hint="em breve (custo Meta)"
-        />
-      )}
+    <div className="mb-5 inline-flex gap-1 rounded-xl border border-border bg-surface p-1">
+      {item("funil", "Funil")}
+      {item("origem", "Origem")}
     </div>
   );
 }
 
-/* ---- 2. Funil ---- */
-function FunnelSection({ d }: { d: DashboardData }) {
-  const isOutreach = d.sourceKind === "outreach";
-  const steps = isOutreach
-    ? [
-        { label: d.labels.leads, value: d.leads.current, color: "bg-secondary", soon: false },
-        {
-          label: d.labels.conversaram,
-          value: d.conversaram.current,
-          color: "bg-accent-2",
-          soon: false,
-        },
-        { label: "Engajaram", value: 0, color: "bg-success", soon: true },
-        { label: "Agendaram", value: 0, color: "bg-muted-2", soon: true },
-      ]
-    : d.reservas
-      ? // ⚠️ Restaurante (clique-pra-WhatsApp): NÃO existe "lead" de formulário,
-        // a pessoa cai direto na conversa. Por isso o topo do funil é a CONVERSA.
-        // Era esse o motivo de a tela do Gramado mostrar "Leads: 0" pra sempre.
-        [
-          {
-            label: "Conversas iniciadas",
-            value: d.conversas.current,
-            color: "bg-secondary",
-            soon: false,
-          },
-          {
-            label: "Engajaram (4+ msgs)",
-            value: d.engajaram,
-            color: "bg-accent-2",
-            soon: false,
-          },
-          {
-            label: "Reservaram",
-            value: d.reservas.feitas,
-            color: "bg-success",
-            soon: false,
-          },
-          {
-            label: "Compareceram",
-            value: d.reservas.compareceram,
-            color: "bg-accent",
-            soon: false,
-          },
-        ]
-      : [
-        { label: d.labels.leads, value: d.leads.current, color: "bg-secondary", soon: false },
-        {
-          label: d.labels.conversaram,
-          value: d.conversaram.current,
-          color: "bg-accent-2",
-          soon: false,
-        },
-        {
-          label: "Engajaram (4+ msgs)",
-          value: d.engajaram,
-          color: "bg-success",
-          soon: false,
-        },
-        { label: "Agendaram", value: d.agendaram, color: "bg-muted-2", soon: true },
-      ];
-  const base = Math.max(steps[0].value, 1);
+/* ---- 1. A taxa que importa: fim a fim ---- */
+function ResumoSection({ funil }: { funil: Funil }) {
+  const taxa = taxaFimAFim(funil);
+  const perda = maiorPerda(funil);
+  if (!taxa) return null;
+
+  const delta =
+    funil.comparavel && taxa.fim.previous !== null && taxa.topo.previous !== null
+      ? pctDelta(
+          taxa.topo.value > 0 ? taxa.fim.value / taxa.topo.value : 0,
+          taxa.topo.previous > 0 ? taxa.fim.previous / taxa.topo.previous : 0,
+        )
+      : null;
 
   return (
-    <Card glass className="p-5">
-      <SectionHead
-        icon={<Target className="size-4 text-secondary" />}
-        title="Funil de conversão"
-        subtitle={
-          isOutreach
-            ? "Do disparo à resposta do lead"
-            : d.reservas
-              ? "Da conversa iniciada à mesa ocupada"
-              : "Do lead capturado ao agendamento"
-        }
-      />
-      <div className="mt-4 space-y-2.5">
-        {steps.map((s, i) => {
-          const width = Math.max((s.value / base) * 100, s.value > 0 ? 6 : 2);
-          const pass =
-            i === 0
-              ? null
-              : steps[i - 1].value > 0
-                ? (s.value / steps[i - 1].value) * 100
-                : 0;
-          return (
-            <div key={s.label} className="flex items-center gap-3">
-              <div className="w-28 shrink-0 text-xs text-muted sm:w-36 sm:text-sm">
-                {s.label}
-              </div>
-              <div className="relative h-8 flex-1 overflow-hidden rounded-lg bg-surface-2">
-                <div
-                  className={`h-full rounded-lg ${s.color}`}
-                  style={{ width: `${width}%`, opacity: s.soon ? 0.4 : 1 }}
-                />
-                <span className="tnum absolute inset-y-0 left-3 flex items-center text-xs font-semibold text-fg">
-                  {s.soon ? "em breve" : formatNumber(s.value)}
-                </span>
-              </div>
-              <div className="w-12 shrink-0 text-right text-[11px] text-muted-2 sm:w-16">
-                {pass === null ? (
-                  <span className="text-secondary">100%</span>
-                ) : s.soon ? (
-                  "—"
-                ) : (
-                  formatPct(pass)
-                )}
-              </div>
-            </div>
-          );
-        })}
+    <Card glass className="relative overflow-hidden p-5 sm:p-6">
+      <div className="pointer-events-none absolute -right-16 -top-20 size-56 rounded-full bg-gradient-to-br from-secondary/25 via-accent-2/15 to-transparent blur-3xl" />
+      <div className="relative flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">
+            {taxa.completo
+              ? "Taxa fim a fim"
+              : `Do topo até ${taxa.fim.verbo}`}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="tnum text-4xl font-semibold tracking-tight sm:text-5xl">
+              {formatPct(taxa.pct, 1)}
+            </span>
+            {delta !== null ? (
+              <Variacao delta={delta} destacar={funil.destacarVariacao} />
+            ) : null}
+          </div>
+          <p className="mt-2 text-sm text-muted">
+            {formatNumber(taxa.fim.value)} de {formatNumber(taxa.topo.value)}{" "}
+            {funil.unidade} chegaram até {taxa.fim.verbo}
+          </p>
+        </div>
+
+        {perda ? (
+          <div className="flex max-w-sm items-start gap-2.5 rounded-xl border border-accent/30 bg-accent/5 p-3.5">
+            <TrendingDown className="mt-0.5 size-4 shrink-0 text-accent" />
+            <p className="text-sm text-muted">
+              <span className="font-medium text-fg">
+                Perde {formatPct(perda.pct)}
+              </span>{" "}
+              entre {perda.de} e {perda.para}. É aí que vale mexer primeiro.
+            </p>
+          </div>
+        ) : null}
       </div>
     </Card>
   );
 }
 
+/* ---- 2. O funil ---- */
+const CORES: Record<string, string> = {
+  chegou: "bg-secondary",
+  respondeu: "bg-accent-2",
+  avancou: "bg-accent",
+  fechou: "bg-success",
+  extra: "bg-primary",
+};
+
+function FunilSection({ d }: { d: DashboardData }) {
+  const funil = d.funil;
+  const base = Math.max(funil.etapas[0]?.value ?? 0, 1);
+
+  return (
+    <Card glass className="p-5">
+      <SectionHead
+        icon={<Target className="size-4 text-secondary" />}
+        title="Funil do bot"
+        subtitle={`Cada etapa em ${funil.unidade}, sem contar a mesma pessoa duas vezes`}
+      />
+
+      <div className="mt-4 space-y-2.5">
+        {funil.etapas.map((e, i) => {
+          const anterior = i > 0 ? funil.etapas[i - 1] : null;
+          const passagem =
+            anterior && anterior.value > 0
+              ? (e.value / anterior.value) * 100
+              : null;
+          const largura = Math.max((e.value / base) * 100, e.value > 0 ? 6 : 2);
+          const delta =
+            funil.comparavel && e.previous !== null
+              ? pctDelta(e.value, e.previous)
+              : null;
+
+          return (
+            <div key={e.key} className="flex items-center gap-3">
+              <div className="w-28 shrink-0 sm:w-44">
+                <p className="truncate text-xs font-medium text-fg sm:text-sm">
+                  {e.label}
+                </p>
+                <p className="truncate text-[11px] text-muted-2" title={e.fonte}>
+                  {e.fonte}
+                </p>
+              </div>
+
+              <div className="relative h-9 flex-1 overflow-hidden rounded-lg bg-surface-2">
+                <div
+                  className={cn("h-full rounded-lg transition-all", CORES[e.key])}
+                  style={{ width: `${largura}%` }}
+                />
+                {/* Chip escuro atrás do número: texto claro direto sobre a
+                    barra âmbar/verde não passa no contraste AA. */}
+                <div className="absolute inset-y-0 left-2 flex items-center">
+                  <span className="inline-flex items-center gap-2 rounded-md bg-surface/75 px-2 py-0.5">
+                    <span className="tnum text-xs font-semibold text-fg">
+                      {formatNumber(e.value)}
+                    </span>
+                    {e.hint ? (
+                      <span className="hidden text-[11px] text-muted sm:inline">
+                        {e.hint}
+                      </span>
+                    ) : null}
+                  </span>
+                </div>
+              </div>
+
+              {/* Passagem = quantos da etapa anterior chegaram aqui. A variação
+                  contra o período anterior vem embaixo, quando existe. */}
+              <div className="flex w-14 shrink-0 flex-col items-end gap-1 sm:w-20">
+                {passagem !== null ? (
+                  <span className="tnum text-[11px] text-muted-2">
+                    {formatPct(passagem)}
+                  </span>
+                ) : null}
+                {delta !== null ? (
+                  <Variacao delta={delta} destacar={funil.destacarVariacao} />
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Rodape d={d} />
+    </Card>
+  );
+}
+
+/**
+ * O rodapé carrega o que sobrou dos cards antigos e o aviso que evita leitura
+ * errada: as últimas etapas do período ainda vão subir.
+ */
+function Rodape({ d }: { d: DashboardData }) {
+  const funil = d.funil;
+  const resp = formatDuration(d.bot.avgFirstRespSec);
+  return (
+    <div className="mt-5 space-y-2 border-t border-border pt-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-muted-2">
+        {resp !== "—" ? (
+          <span className="inline-flex items-center gap-1.5">
+            <Timer className="size-3.5" />
+            Responde em {resp}, em média
+          </span>
+        ) : null}
+        <span className="inline-flex items-center gap-1.5">
+          <Activity className="size-3.5" />
+          {formatNumber(d.conversasAtivas)} em conversa nas últimas 24h
+        </span>
+      </div>
+
+      <p className="text-[11px] text-muted-2">
+        Quem chegou ontem ou hoje ainda pode fechar amanhã: as últimas etapas
+        deste período ainda vão subir.
+      </p>
+
+      {funil.ausentes.map((linha) => (
+        <p key={linha} className="text-[11px] text-muted-2">
+          {linha}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /* ---- 3. Evolução ---- */
-function TimelineSection({
-  d,
+function EvolucaoSection({
+  funil,
   todayStr,
 }: {
-  d: DashboardData;
+  funil: Funil;
   todayStr: string;
 }) {
   return (
     <Card glass className="p-5">
       <SectionHead
         icon={<TrendingUp className="size-4 text-secondary" />}
-        title="Evolução no tempo"
-        subtitle={`${d.labels.leads} e conversas por dia`}
+        title="O funil no tempo"
+        subtitle="Quem chegou e quem fechou, dia a dia"
         legend={
           <div className="flex items-center gap-3 text-[11px] text-muted">
-            <LegendDot color="#3b82f6" label={d.labels.leads} />
-            <LegendDot color="#8b5cf6" label="Conversas" />
+            <LegendDot color="#3b82f6" label={funil.serie.chegou} />
+            {funil.serie.fechou ? (
+              <LegendDot color="#4ade80" label={funil.serie.fechou} />
+            ) : null}
           </div>
         }
       />
       <div className="mt-3">
-        <TimelineChart data={d.timeline} todayStr={todayStr} />
+        <FunilTimeline
+          data={funil.porDia}
+          todayStr={todayStr}
+          labels={funil.serie}
+        />
       </div>
     </Card>
   );
 }
 
-/* ---- 4. Ranking de anúncios ---- */
+/* ---- 4. Aba Origem: de onde veio quem chegou ---- */
 function AdRankingSection({ rows }: { rows: DashboardData["adRanking"] }) {
   const eligible = rows.filter((r) => r.leads >= 3);
   const bestName = eligible[0]?.ad_name;
@@ -407,7 +382,7 @@ function AdRankingSection({ rows }: { rows: DashboardData["adRanking"] }) {
         </p>
       ) : (
         <div className="mt-4 -mx-1 overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-2">
                 <th className="px-2 py-2 font-medium">Anúncio</th>
@@ -415,7 +390,6 @@ function AdRankingSection({ rows }: { rows: DashboardData["adRanking"] }) {
                 <th className="px-2 py-2 text-right font-medium">Leads</th>
                 <th className="px-2 py-2 text-right font-medium">Conv.</th>
                 <th className="px-2 py-2 text-right font-medium">% conversa</th>
-                <th className="px-2 py-2 text-right font-medium">CPL</th>
               </tr>
             </thead>
             <tbody>
@@ -425,20 +399,15 @@ function AdRankingSection({ rows }: { rows: DashboardData["adRanking"] }) {
                 return (
                   <tr
                     key={`${r.ad_name}-${i}`}
-                    className={`border-b border-border/60 last:border-0 ${
-                      isBest
-                        ? "bg-success/5"
-                        : isWorst
-                          ? "bg-destructive/5"
-                          : ""
-                    }`}
+                    className={cn(
+                      "border-b border-border/60 last:border-0",
+                      isBest && "bg-success/5",
+                      isWorst && "bg-destructive/5",
+                    )}
                   >
                     <td className="max-w-[180px] px-2 py-2.5">
                       <div className="flex items-center gap-2">
-                        <span
-                          className="truncate font-medium"
-                          title={r.ad_name}
-                        >
+                        <span className="truncate font-medium" title={r.ad_name}>
                           {r.ad_name}
                         </span>
                         {isBest ? (
@@ -474,9 +443,6 @@ function AdRankingSection({ rows }: { rows: DashboardData["adRanking"] }) {
                         {formatPct(r.taxa)}
                       </span>
                     </td>
-                    <td className="px-2 py-2.5 text-right text-[11px] text-muted-2">
-                      em breve
-                    </td>
                   </tr>
                 );
               })}
@@ -488,14 +454,13 @@ function AdRankingSection({ rows }: { rows: DashboardData["adRanking"] }) {
   );
 }
 
-/* ---- 5. Plataforma + campanhas ---- */
 function PlatformSection({ d }: { d: DashboardData }) {
   return (
     <Card glass className="p-5">
       <SectionHead
         icon={<Radio className="size-4 text-secondary" />}
         title="Leads por plataforma"
-        subtitle="Origem dos formulários"
+        subtitle="Onde o anúncio foi visto"
       />
       <div className="mt-4">
         <CategoryDonut
@@ -531,140 +496,7 @@ function CampaignSection({ d }: { d: DashboardData }) {
   );
 }
 
-/* ---- 5b. Prospecção por canal (fonte outreach) ---- */
-function OutreachChannelSection({ d }: { d: DashboardData }) {
-  return (
-    <Card glass className="p-5">
-      <SectionHead
-        icon={<Radio className="size-4 text-secondary" />}
-        title="Disparos por canal"
-        subtitle="Distribuição da prospecção entre WhatsApp e e-mail"
-      />
-      <div className="mt-4">
-        {d.outreachByChannel.length ? (
-          <CategoryDonut
-            data={d.outreachByChannel.map((x) => ({
-              key: x.channel,
-              value: x.value,
-              label: channelLabel(x.channel),
-            }))}
-            unit="disparos"
-          />
-        ) : (
-          <p className="py-8 text-center text-sm text-muted-2">
-            Sem disparos no período.
-          </p>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-/* ---- 6. Saúde do bot ---- */
-function BotHealthSection({
-  d,
-  canSeeCost,
-}: {
-  d: DashboardData;
-  canSeeCost: boolean;
-}) {
-  return (
-    <Card glass className="p-5">
-      <SectionHead
-        icon={<Gauge className="size-4 text-success" />}
-        title="Saúde do bot"
-        subtitle="Velocidade, volume e custo do atendimento"
-      />
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <MiniStat
-          icon={<Timer className="size-4" />}
-          label="1ª resposta"
-          value={formatDuration(d.bot.avgFirstRespSec)}
-        />
-        <MiniStat
-          icon={<MessageSquareDot className="size-4" />}
-          label="Msgs / conversa"
-          value={d.bot.avgMsgs ? d.bot.avgMsgs.toFixed(1) : "0"}
-        />
-        {canSeeCost ? (
-          <div className="rounded-xl border border-border bg-surface-2/40 p-3">
-            <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-2">
-              Custo de IA / dia
-            </div>
-            <div className="tnum text-sm font-semibold">
-              {formatBRL(d.custoUsd.current)}
-            </div>
-            <CostSparkline data={d.timeline} />
-          </div>
-        ) : null}
-        <div className="rounded-xl border border-border bg-surface-2/40 p-3">
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-2">
-            Canais
-          </div>
-          {d.byChannel.length ? (
-            <ul className="space-y-1">
-              {d.byChannel.slice(0, 3).map((c) => (
-                <li
-                  key={c.channel}
-                  className="flex items-center justify-between text-xs text-muted"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <ChannelIcon channel={c.channel} className="size-3" />
-                    {channelLabel(c.channel)}
-                  </span>
-                  <span className="tnum font-medium text-fg">{c.value}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-muted-2">Sem dados</p>
-          )}
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-/* ---- 7. Insights ---- */
-function InsightsSection({
-  d,
-  canSeeCost,
-}: {
-  d: DashboardData;
-  canSeeCost: boolean;
-}) {
-  const insights = buildInsights(d, canSeeCost);
-  if (!insights.length) return null;
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {insights.map((it, i) => (
-        <div
-          key={i}
-          className={`flex items-start gap-2.5 rounded-xl border p-3.5 text-sm ${
-            it.kind === "good"
-              ? "border-success/30 bg-success/5"
-              : it.kind === "bad"
-                ? "border-destructive/30 bg-destructive/5"
-                : "border-accent/30 bg-accent/5"
-          }`}
-        >
-          <span className="mt-0.5 shrink-0">
-            {it.kind === "good" ? (
-              <CheckCircle2 className="size-4 text-[#4ade80]" />
-            ) : it.kind === "bad" ? (
-              <XCircle className="size-4 text-[#f87171]" />
-            ) : (
-              <AlertTriangle className="size-4 text-accent" />
-            )}
-          </span>
-          <p className="text-muted">{it.text}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ---- 8. Últimas conversas ---- */
+/* ---- 5. Últimas conversas ---- */
 function RecentSection({
   basePath,
   rows,
@@ -687,8 +519,7 @@ function RecentSection({
         <ul className="mt-3 divide-y divide-border/60">
           {rows.map((r) => {
             const msgs = r.message_count ?? 0;
-            const name =
-              r.full_name ?? r.title ?? r.chat_id ?? "Contato sem nome";
+            const name = r.full_name ?? r.title ?? r.chat_id ?? "Contato sem nome";
             return (
               <li key={r.session_id}>
                 <Link
@@ -706,11 +537,11 @@ function RecentSection({
                   </div>
                   {msgs >= 4 ? (
                     <Badge tone="success" className="shrink-0">
-                      engajou
+                      avançou
                     </Badge>
                   ) : msgs > 0 ? (
                     <Badge tone="secondary" className="shrink-0">
-                      conversou
+                      respondeu
                     </Badge>
                   ) : (
                     <Badge tone="neutral" className="shrink-0">
@@ -729,6 +560,39 @@ function RecentSection({
 }
 
 /* ---- helpers de UI ---- */
+
+/**
+ * ⚠️ `destacar=false` é rigor, não enfeite: com menos de 30 pessoas na semana,
+ * 10% é ruído estatístico. O número continua na tela, sem a cor que manda o
+ * cliente comemorar ou entrar em pânico à toa.
+ */
+function Variacao({ delta, destacar }: { delta: number; destacar: boolean }) {
+  const n = Math.round(delta);
+  const flat = n === 0;
+  const Icon = flat ? Minus : n > 0 ? ArrowUp : ArrowDown;
+  const cls = !destacar || flat
+    ? "bg-surface-2 text-muted-2"
+    : n > 0
+      ? "bg-success/15 text-[#4ade80]"
+      : "bg-destructive/15 text-[#f87171]";
+  return (
+    <span
+      title={
+        destacar
+          ? "Contra o período anterior de mesmo tamanho"
+          : "Base pequena no período: variação é ruído, por isso sem destaque"
+      }
+      className={cn(
+        "tnum inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium",
+        cls,
+      )}
+    >
+      <Icon className="size-3" />
+      {Math.abs(n)}%
+    </span>
+  );
+}
+
 function SectionHead({
   icon,
   title,
@@ -768,95 +632,9 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   );
 }
 
-function MiniStat({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-border bg-surface-2/40 p-3">
-      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-2">
-        {icon}
-        {label}
-      </div>
-      <div className="tnum mt-1.5 text-xl font-semibold">{value}</div>
-    </div>
-  );
-}
-
 function formatDuration(sec: number | null): string {
   if (sec === null || !Number.isFinite(sec) || sec <= 0) return "—";
   if (sec < 60) return `${Math.round(sec)}s`;
   if (sec < 3600) return `${Math.round(sec / 60)}min`;
   return `${(sec / 3600).toFixed(1)}h`;
-}
-
-type Insight = { kind: "good" | "warn" | "bad"; text: string };
-
-function buildInsights(d: DashboardData, canSeeCost: boolean): Insight[] {
-  const out: Insight[] = [];
-  const leadsDelta = pctDelta(d.leads.current, d.leads.previous);
-  const convDelta = pctDelta(d.conversas.current, d.conversas.previous);
-  const custoDelta = pctDelta(d.custoUsd.current, d.custoUsd.previous);
-  const taxa =
-    d.leads.current > 0 ? (d.conversaram.current / d.leads.current) * 100 : 0;
-
-  const noun = d.labels.leads;
-  const nounLow = noun.toLowerCase();
-
-  if (leadsDelta !== null && leadsDelta <= -15) {
-    out.push({
-      kind: "bad",
-      text: `${noun} caíram ${Math.abs(
-        Math.round(leadsDelta),
-      )}% vs o período anterior. Vale revisar a fonte.`,
-    });
-  } else if (leadsDelta !== null && leadsDelta >= 15) {
-    out.push({
-      kind: "good",
-      text: `${noun} subiram ${Math.round(
-        leadsDelta,
-      )}% vs o período anterior. Bom momento para escalar.`,
-    });
-  }
-
-  const best = d.adRanking.filter((r) => r.leads >= 3)[0];
-  if (best) {
-    out.push({
-      kind: "good",
-      text: `Anúncio "${best.ad_name}" tem a melhor taxa de conversa (${formatPct(
-        best.taxa,
-      )}). Considere escalar.`,
-    });
-  }
-
-  if (
-    canSeeCost &&
-    custoDelta !== null &&
-    custoDelta >= 15 &&
-    (convDelta === null || convDelta <= 0)
-  ) {
-    out.push({
-      kind: "warn",
-      text: `Custo de IA subiu ${Math.round(
-        custoDelta,
-      )}% sem aumento de conversas. Verifique o consumo do bot.`,
-    });
-  }
-
-  if (d.leads.current >= 5 && taxa < 30) {
-    out.push({
-      kind: "warn",
-      text:
-        d.sourceKind === "outreach"
-          ? `Só ${formatPct(taxa)} dos ${nounLow} responderam. Teste outro template ou horário de disparo.`
-          : `Só ${formatPct(taxa)} dos ${nounLow} iniciam conversa. Dispare um template de 1º toque na página Leads.`,
-    });
-  }
-
-  return out.slice(0, 3);
 }

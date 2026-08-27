@@ -256,12 +256,22 @@ type TimelinePoint = {
   cost: number;
 };
 
-export function TimelineChart({
+type FunilPoint = { day: string; chegou: number; fechou: number };
+
+/**
+ * O funil no tempo: quem CHEGOU e quem FECHOU, dia a dia. Era "Leads e
+ * conversas", com a linha de leads presa a public.meta_leads (fonte morta,
+ * reta no zero). A linha de fechamento some quando o bot não mede fechamento,
+ * em vez de desenhar um zero que parece performance ruim.
+ */
+export function FunilTimeline({
   data,
   todayStr,
+  labels,
 }: {
-  data: TimelinePoint[];
+  data: FunilPoint[];
   todayStr: string;
+  labels: { chegou: string; fechou: string | null };
 }) {
   if (!data.length) return <Empty />;
   return (
@@ -298,15 +308,19 @@ export function TimelineChart({
                 title={fmtDay(String(payload[0].payload.day))}
                 rows={[
                   {
-                    label: "Leads",
-                    value: String(payload[0].payload.leads),
+                    label: labels.chegou,
+                    value: String(payload[0].payload.chegou),
                     color: "#3b82f6",
                   },
-                  {
-                    label: "Conversas",
-                    value: String(payload[0].payload.conversas),
-                    color: "#8b5cf6",
-                  },
+                  ...(labels.fechou
+                    ? [
+                        {
+                          label: labels.fechou,
+                          value: String(payload[0].payload.fechou),
+                          color: "#4ade80",
+                        },
+                      ]
+                    : []),
                 ]}
               />
             ) : null
@@ -314,20 +328,22 @@ export function TimelineChart({
         />
         <Line
           type="monotone"
-          dataKey="leads"
+          dataKey="chegou"
           stroke="#3b82f6"
           strokeWidth={2}
           dot={false}
           activeDot={{ r: 4 }}
         />
-        <Line
-          type="monotone"
-          dataKey="conversas"
-          stroke="#8b5cf6"
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 4 }}
-        />
+        {labels.fechou ? (
+          <Line
+            type="monotone"
+            dataKey="fechou"
+            stroke="#4ade80"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4 }}
+          />
+        ) : null}
       </LineChart>
     </ResponsiveContainer>
   );
