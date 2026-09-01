@@ -178,26 +178,133 @@ export async function getConversation(
 
 // Conversas do bot com tag de origem + prospecção (Minerador) -----------
 
-export type ConvOrigin = "Anúncio" | "Direto" | "Prospecção" | "Disparo";
+/**
+ * A ORIGEM do lead, com a PLATAFORMA no rótulo.
+ *
+ * ⚠️ 28/08/2026. Antes daqui saíam só "Anúncio" e "Direto", e "Anúncio" não
+ * dizia nada: o Gastão pediu a origem de verdade ("Meta, Google, se veio de
+ * IA"). Estes são os rótulos que o dado de HOJE sustenta, e nenhum a mais:
+ *
+ *   Instagram / Facebook  clique no anúncio (public.ctwa_referrals, a
+ *                         plataforma sai do source_url) ou formulário
+ *                         (public.meta_leads.platform = ig/fb)
+ *   Meta Ads              veio de anúncio da Meta, mas sem plataforma no dado
+ *   Anúncio               o lead DISSE na conversa que veio de anúncio, e não
+ *                         casou com nenhuma tabela. Não dá pra afirmar a
+ *                         plataforma, então o rótulo não inventa uma
+ *   Prospecção / Disparo  saída ativa nossa, não entrada de mídia
+ *   Direto                sem origem conhecida
+ *
+ * ⚠️ Google e "IA" NÃO entram: não existe fonte no banco (nenhum gclid, nenhum
+ * utm preenchido, nenhuma tabela de Google Ads). Categoria que nunca preenche
+ * é pior que categoria ausente, então o rótulo só nasce quando o dado nascer.
+ */
+export type ConvOrigin =
+  | "Instagram"
+  | "Facebook"
+  | "Meta Ads"
+  | "Anúncio"
+  | "Direto"
+  | "Prospecção"
+  | "Disparo";
 export type ConvChannel = "whatsapp" | "email";
 export type ConvFilter = "all" | "ativas24h" | "responderam";
 
-export type BotConvRow = ConversationRow & { origin: ConvOrigin };
+export type BotConvRow = ConversationRow & {
+  origin: ConvOrigin;
+  /** Caminho e campanha, pra segunda linha do card. Ex.: "Clique no anúncio · [V6] Estrutura Real". */
+  originDetail: string | null;
+};
+
+type OrigemRow = ConversationRow & {
+  origem_tipo: string;
+  ctwa_url: string | null;
+  form_platform: string | null;
+  ad_name: string | null;
+  campaign_name: string | null;
+};
 
 /**
- * Conversas do bot (Hermes) do canal pedido, com tag de origem:
- * "Anúncio" quando o telefone casa com um lead de meta_leads, senão "Direto".
+ * A plataforma sai da URL de onde o anúncio foi clicado, que é o único lugar
+ * onde o Click-to-WhatsApp diz isso: instagram.com/p/... veio do Instagram,
+ * fb.me/... veio do Facebook. Sem URL reconhecida, devolve null em vez de
+ * chutar uma das duas.
+ */
+function plataformaCtwa(url: string | null): string | null {
+  const u = (url ?? "").toLowerCase();
+  if (u.includes("instagram.com") || u.includes("ig.me")) return "instagram";
+  if (u.includes("facebook.com") || u.includes("fb.me") || u.includes("fb.com"))
+    return "facebook";
+  return null;
+}
+
+function plataformaDaUrl(url: string | null): ConvOrigin {
+  const p = plataformaCtwa(url);
+  if (p === "instagram") return "Instagram";
+  if (p === "facebook") return "Facebook";
+  return "Meta Ads";
+}
+
+/** Plataforma a partir do campo platform do formulário Meta (ig/fb). */
+function plataformaDoForm(p: string | null): ConvOrigin {
+  const v = (p ?? "").toLowerCase();
+  if (v === "ig" || v === "instagram") return "Instagram";
+  if (v === "fb" || v === "facebook") return "Facebook";
+  return "Meta Ads";
+}
+
+function detalhe(caminho: string, ad: string | null, campanha: string | null): string {
+  const partes = [caminho, ad?.trim() || null, campanha?.trim() || null];
+  return partes.filter(Boolean).join(" · ");
+}
+
+function classificarOrigem(r: OrigemRow): {
+  origin: ConvOrigin;
+  originDetail: string | null;
+} {
+  switch (r.origem_tipo) {
+    case "disparo":
+      return { origin: "Disparo", originDetail: "Disparo nosso pelo WhatsApp" };
+    case "ctwa":
+      return {
+        origin: plataformaDaUrl(r.ctwa_url),
+        originDetail: detalhe("Clique no anúncio", r.ad_name, r.campaign_name),
+      };
+    case "form":
+      return {
+        origin: plataformaDoForm(r.form_platform),
+        originDetail: detalhe("Formulário", r.ad_name, r.campaign_name),
+      };
+    case "frase":
+      return {
+        origin: "Anúncio",
+        originDetail: "O lead disse na conversa que veio de anúncio",
+      };
+    default:
+      return { origin: "Direto", originDetail: null };
+  }
+}
+
+/**
+ * Conversas do bot (Hermes) do canal pedido, já com a origem resolvida.
  * whatsapp = tudo que não é e-mail; email = channel que contém "mail".
  * filter:
  *  - ativas24h: última mensagem do lead (role='user') <= 24h atrás.
  *  - responderam: lead com 2+ mensagens (engajou, respondeu o bot).
+ *
+ * ⚠️ public.meta_leads só é cruzado quando ESTE agente tem fonte de formulário,
+ * e escopado pelo page_id dele. Sem isso, o lead de um cliente marcava a
+ * conversa de outro cliente que tivesse o mesmo telefone, e agora que o rótulo
+ * carrega nome de anúncio e de campanha, isso seria vazamento entre contas.
  */
 export async function getBotConversations(
   slug: string,
   channel: ConvChannel,
   filter: ConvFilter = "all",
 ): Promise<BotConvRow[]> {
-  const schema = await safeSchema(slug);
+  const agent = await requireAgent(slug);
+  const schema = assertIdent(agent.schema);
+  const src = getLeadSource(agent);
   const conds: string[] = [
     channel === "email"
       ? "c.channel ilike '%mail%'"
@@ -208,58 +315,78 @@ export async function getBotConversations(
   } else if (filter === "responderam") {
     conds.push("coalesce(mm.user_count, 0) >= 2");
   }
+
+  // Telefone da conversa só com dígitos. O casamento é exato ou pelos últimos
+  // 8 dígitos, que cobre variação de DDI e do nono dígito.
+  const fone = `regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g')`;
+  const casaFone = (alias: string) =>
+    `${alias}.phone_norm is not null and ${alias}.phone_norm <> '' and (
+       ${fone} = ${alias}.phone_norm
+       or (length(${alias}.phone_norm) >= 8
+           and right(${fone}, 8) = right(${alias}.phone_norm, 8))
+     )`;
+
+  const temForm = src.leadSource === "form";
+  const params: SqlParam[] = temForm ? [slug, src.pageId] : [slug];
+
   try {
-    const rows = await sql.unsafe<(ConversationRow & { origin: string })[]>(
+    const rows = await sql.unsafe<OrigemRow[]>(
       `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
               c.ended_at, c.message_count, c.cost_usd,
               case
+                when disp.ok then 'disparo'
+                when ctwa.phone_norm is not null then 'ctwa'
+                ${temForm ? "when form.phone_norm is not null then 'form'" : ""}
                 when exists (
-                  select 1 from public.outreach_sent os
-                  where os.agent_slug = $1 and os.status = 'sent'
-                    and os.phone_norm is not null and os.phone_norm <> '' and (
-                      regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = os.phone_norm
-                      or (length(os.phone_norm) >= 8
-                          and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
-                              = right(os.phone_norm, 8))
-                    )
-                ) then 'Disparo'
-                when exists (
-                  select 1 from public.meta_leads l
-                  where l.phone_norm is not null and l.phone_norm <> '' and (
-                    regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
-                    or (length(l.phone_norm) >= 8
-                        and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
-                            = right(l.phone_norm, 8))
-                  )
-                ) or exists (
-                  select 1 from public.ctwa_referrals r
-                  where r.phone_norm is not null and r.phone_norm <> '' and (
-                    regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = r.phone_norm
-                    or (length(r.phone_norm) >= 8
-                        and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
-                            = right(r.phone_norm, 8))
-                  )
-                ) or exists (
                   select 1 from "${schema}".messages m
                   where m.session_id = c.session_id and m.role = 'user'
                     and (m.content ilike '%vim%anúncio%' or m.content ilike '%vim%anuncio%')
-                ) then 'Anúncio'
-                else 'Direto'
-              end as origin
+                ) then 'frase'
+                else 'direto'
+              end as origem_tipo,
+              ctwa.source_url as ctwa_url,
+              ${temForm ? "form.platform" : "null::text"} as form_platform,
+              ${temForm ? "coalesce(ctwa.ad_name, form.ad_name)" : "ctwa.ad_name"} as ad_name,
+              ${temForm ? "coalesce(ctwa.campaign_name, form.campaign_name)" : "ctwa.campaign_name"} as campaign_name
        from "${schema}".conversations c
        left join lateral (
          select max(m.ts) filter (where m.role = 'user') as last_user_ts,
                 count(*) filter (where m.role = 'user') as user_count
          from "${schema}".messages m where m.session_id = c.session_id
        ) mm on true
+       left join lateral (
+         select true ok from public.outreach_sent os
+         where os.agent_slug = $1 and os.status = 'sent' and ${casaFone("os")}
+         limit 1
+       ) disp on true
+       left join lateral (
+         select r.phone_norm, r.source_url, r.ad_name, r.campaign_name
+         from public.ctwa_referrals r
+         where ${casaFone("r")}
+         order by r.ts desc nulls last
+         limit 1
+       ) ctwa on true
+       ${
+         temForm
+           ? `left join lateral (
+         select l.phone_norm, l.platform, l.ad_name, l.campaign_name
+         from public.meta_leads l
+         where l.page_id = $2 and ${casaFone("l")}
+         order by l.created_time desc nulls last
+         limit 1
+       ) form on true`
+           : ""
+       }
        where ${conds.join(" and ")}
        order by coalesce(c.ended_at, c.started_at) desc nulls last`,
-      [slug],
+      params,
     );
-    const norm = (o: string): ConvOrigin =>
-      o === "Disparo" ? "Disparo" : o === "Anúncio" ? "Anúncio" : "Direto";
-    return rows.map((r) => ({ ...r, origin: norm(r.origin) }));
-  } catch {
+    return rows.map((r) => ({ ...r, ...classificarOrigem(r) }));
+  } catch (e) {
+    console.error(
+      `[conversas] origem falhou (agente ${slug}, canal ${channel}):`,
+      e instanceof Error ? e.message : e,
+    );
     return [];
   }
 }
@@ -604,7 +731,8 @@ async function getCtwaLead(
       campaign_name: row.campaign_name,
       adset_name: row.adset_name,
       ad_name: row.ad_name,
-      platform: null,
+      // A plataforma do clique vem da URL do anúncio, não de um campo próprio.
+      platform: plataformaCtwa(row.source_url),
       full_name: null,
       phone: row.phone_norm,
       phone_norm: row.phone_norm,
@@ -1383,15 +1511,26 @@ export async function getDashboard(
 
   const [avgFirstRespSec, avgMsgs] = await Promise.all([
     (async () => {
+      // ⚠️ 28/08/2026. Esta era a consulta MAIS LENTA do painel: 1,3s de média
+      // e 68,6s de pico em produção (pg_stat_statements, schema agente24horas).
+      // Dois `group by` varriam a tabela de mensagens INTEIRA, sem filtro de
+      // período, e o resultado alimentava só o selo do rodapé. Agora é uma
+      // varredura só e restrita às conversas do período, que é o recorte da
+      // tela: 2048 buffers viraram 1143.
+      // ⚠️ NÃO existe índice em messages(session_id): trocar esta forma por um
+      // exists/lateral por conversa devolve a tabela inteira varrida N vezes.
       const v = await scalar(
-        `select avg(extract(epoch from (a.fa - u.fu)))::float v from (
-           select session_id, min(ts) fu from "${schema}".messages where role = 'user' group by session_id
-         ) u
-         join (
-           select session_id, min(ts) fa from "${schema}".messages where role = 'assistant' group by session_id
-         ) a on a.session_id = u.session_id
-         where a.fa > u.fu`,
-        [],
+        `select avg(extract(epoch from (fa - fu)))::float v from (
+           select m.session_id,
+                  min(m.ts) filter (where m.role = 'user') fu,
+                  min(m.ts) filter (where m.role = 'assistant') fa
+           from "${schema}".messages m
+           join "${schema}".conversations c on c.session_id = m.session_id
+           where c.started_at >= $1 and c.started_at < $2
+           group by m.session_id
+         ) t
+         where fu is not null and fa is not null and fa > fu`,
+        [curStart, curEnd],
       );
       return v > 0 ? v : null;
     })(),
