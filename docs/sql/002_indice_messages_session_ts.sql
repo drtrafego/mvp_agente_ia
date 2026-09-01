@@ -1,0 +1,127 @@
+-- =============================================================================
+-- 002. Índice de messages (session_id, ts) nos schemas dos agentes
+--
+-- ⚠️ NÃO EXECUTADO. Pronto e testado fora de produção; rodar é decisão do
+-- Gastão. Leia "COMO RODAR" antes, e leia os ACHADOS no fim: a medição corrige
+-- parte do diagnóstico que motivou este arquivo.
+--
+-- POR QUE
+--
+-- O índice já estava ESCRITO no projeto, dentro de
+-- public.provision_agent_schema() (001_agentes_multi_empresa.sql, linha 181), e
+-- nunca foi aplicado: essa função tem ZERO chamadas no repositório inteiro. Quem
+-- cria as tabelas de verdade é hermes/central-db/sync.py (linhas 36 a 44), e o
+-- DDL de lá não cria índice nenhum. Os três schemas vivos têm só as chaves
+-- primárias (conversations.session_id e messages.id).
+--
+-- MEDIDO (não estimado)
+--
+-- Postgres 16 descartável, com a MESMA estrutura que o sync.py cria, populado
+-- na escala do agente24horas: 446 conversas e 15.164 mensagens.
+--
+-- Consulta da lista com os filtros "Ativas 24h" / "Responderam", que são os que
+-- de fato usam o join lateral de contagem por sessão:
+--
+--   sem índice: Seq Scan em messages, 446 loops, 73.150 buffers, 575 ms
+--   com índice: Bitmap Index Scan,    446 loops, 16.119 buffers,  26 ms
+--
+-- Ou seja: 4,5x menos buffers e 22x mais rápido, no filtro que usa o join.
+--
+-- CUSTO
+--
+-- Aditivo: não altera dado e desfaz com um `drop index`. Ocupa disco
+-- proporcional à tabela de mensagens e encarece um pouco o INSERT do sync (que
+-- roda de 15 em 15 minutos, em lote: não se sente).
+--
+-- COMO RODAR
+--
+-- CONCURRENTLY não bloqueia escrita, que é o certo com dado real, mas NÃO PODE
+-- rodar dentro de transação: uma linha de cada vez, em autocommit. No psql:
+--
+--   \set AUTOCOMMIT on
+--
+-- Se uma linha falhar no meio, o índice fica inválido (o Postgres avisa):
+-- `drop index concurrently <nome>` e rode de novo. Idempotente: `if not exists`
+-- deixa rodar quantas vezes precisar (verificado, roda duas vezes sem erro).
+-- =============================================================================
+
+create index concurrently if not exists messages_session_ts_idx
+  on "agente24horas".messages (session_id, ts);
+
+create index concurrently if not exists messages_session_ts_idx
+  on "drlucas".messages (session_id, ts);
+
+create index concurrently if not exists messages_session_ts_idx
+  on "casaldotrafego".messages (session_id, ts);
+
+-- -----------------------------------------------------------------------------
+-- CONFERIR. Uma linha por schema quando o índice existe.
+-- -----------------------------------------------------------------------------
+-- select schemaname, tablename, indexname
+--   from pg_indexes
+--  where tablename = 'messages'
+--    and schemaname in ('agente24horas', 'drlucas', 'casaldotrafego')
+--  order by schemaname;
+--
+-- Índice que ficou inválido por falha no meio (esperado: nenhuma linha):
+-- select indrelid::regclass, indexrelid::regclass
+--   from pg_index where not indisvalid;
+
+-- =============================================================================
+-- ACHADOS DA MEDIÇÃO. Leia antes de tirar conclusão de performance daqui.
+-- =============================================================================
+--
+-- 1. "2N varreduras de messages por render" está ERRADO, e superestima.
+--    O plano real, medido:
+--    . no filtro padrão ("Todas"), o join lateral de contagem é ELIMINADO pelo
+--      planejador: nenhuma coluna dele é usada. Ele só materializa em
+--      "Ativas 24h" e "Responderam". No filtro padrão o índice não muda nada.
+--    . o `exists` do "vim do anúncio" NÃO roda por conversa: o planejador o
+--      transforma num SubPlan hasheado, executado UMA VEZ (loops=1, 164
+--      buffers, ~14 ms). Ele lê a tabela de mensagens inteira uma vez, não 446.
+--
+-- 2. Por isso: NÃO tirar o `ilike '%vim%anúncio%'` da consulta de lista.
+--    Ele custa uma passada, não N, e é o que produz o selo "Anúncio" pro lead
+--    que disse na conversa de onde veio. Tirar troca informação real por uma
+--    economia que a medição não encontrou. Se um dia ele incomodar, o certo é
+--    calcular a marca no sync (uma coluna booleana em conversations), não
+--    apagar o recurso.
+--
+-- 3. ⚠️ O GARGALO DE VERDADE É OUTRO, e é MUITO maior: o casamento de telefone
+--    contra public.ctwa_referrals e public.outreach_sent.
+--
+--    Mesma base, com 20.000 linhas em ctwa_referrals (escala plausível):
+--
+--      só o join lateral de ctwa_referrals: 446 Seq Scans da tabela inteira,
+--      92.777 buffers, 14.661 ms. QUATORZE SEGUNDOS, numa consulta só.
+--
+--    A causa é o predicado, que nenhum índice comum atende:
+--
+--      regexp_replace(c.chat_id,'\D','','g') = r.phone_norm
+--      OR (length(r.phone_norm) >= 8 AND right(...,8) = right(r.phone_norm,8))
+--
+--    Isso importa AGORA porque a tela passou a se atualizar sozinha de 2 em 2
+--    minutos: o que era uma vez por F5 vira até 30 vezes por hora, por aba
+--    aberta.
+--
+--    A correção foi TESTADA e funciona, mas exige mudar a consulta em
+--    lib/queries.ts junto, então NÃO entra aqui: índice sozinho não resolve,
+--    porque o OR do predicado atual impede o uso dele.
+--
+--      create index concurrently if not exists ctwa_referrals_fone8_idx
+--        on public.ctwa_referrals (right(phone_norm, 8));
+--
+--      e o predicado passa a liderar pela expressão indexada:
+--        where right(r.phone_norm, 8) = right(<fone da conversa>, 8)
+--          and (<fone da conversa> = r.phone_norm or length(r.phone_norm) >= 8)
+--
+--      medido: Index Scan, 1.464 buffers, 10 ms. De 14.661 ms para 10 ms.
+--
+--    O mesmo vale para public.outreach_sent, que usa o mesmo casamento.
+--    Recomendação: tratar como tarefa própria, com o dono aprovando a mudança
+--    de consulta, e não misturar com a correção do botão Voltar.
+--
+-- 4. AGENTE NOVO. Este arquivo lista os três schemas de hoje. Cliente novo entra
+--    aqui também, OU o índice passa a nascer junto com a tabela em
+--    hermes/central-db/sync.py, ao lado do CREATE TABLE das mensagens, que é o
+--    lugar onde ele deveria ter nascido. A segunda opção fecha o buraco de vez.

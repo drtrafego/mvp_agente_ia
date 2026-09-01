@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { formatNumber } from "@/lib/utils";
+import type { MotivoFalha } from "@/lib/use-atualizacao-automatica";
 
 export type InfoConversas = {
   /** Total de itens na aba, contado no CLIENTE: precisa mudar sozinho. */
@@ -9,6 +10,8 @@ export type InfoConversas = {
   ultimaAtualizacao: Date | null;
   atualizando: boolean;
   falhasSeguidas: number;
+  /** Causa da última falha, para o indicador não chamar tudo de "sem conexão". */
+  motivo: MotivoFalha | null;
   atualizarAgora: () => void;
 };
 
@@ -37,8 +40,27 @@ export function StatusAtualizacao() {
   const info = React.useContext(ConversasContexto);
   if (!info) return null;
 
-  const { total, ultimaAtualizacao, atualizando, falhasSeguidas } = info;
+  const { total, ultimaAtualizacao, atualizando, falhasSeguidas, motivo } = info;
   const caiu = falhasSeguidas > 0;
+
+  // ‼️ Sessão vencida ganhou estado próprio (01/09/2026). Antes caía no mesmo
+  // "sem conexão" da queda de rede, e a pessoa ficava esperando a internet
+  // voltar em vez de entrar de novo. Clicar aqui não adianta: o que resolve é
+  // o login, então o controle vira link.
+  if (caiu && motivo === "sessao") {
+    return (
+      <a
+        href="/handler/sign-in"
+        title="Sua sessão venceu. Entre de novo para voltar a ver as conversas de agora."
+        className="flex shrink-0 items-center gap-1.5 text-xs text-muted transition-colors hover:text-fg"
+      >
+        <span className="tnum">{formatNumber(total)} nesta aba</span>
+        <span className="font-medium text-[#f0a35e] underline decoration-dotted underline-offset-2">
+          · sessão expirada, entrar de novo
+        </span>
+      </a>
+    );
+  }
 
   return (
     <button

@@ -13,6 +13,10 @@ import { getMetaConfig } from "@/lib/meta-config";
 
 export const dynamic = "force-dynamic";
 
+// A resposta carrega a conversa inteira de um cliente e o app é enquadrado por
+// um portal de terceiro: nada disto pode encostar em cache compartilhado.
+const SEM_CACHE = { "Cache-Control": "private, no-store" };
+
 /**
  * Carrega SÓ o painel de uma conversa (mensagens + contexto), sem re-renderizar
  * a lista inteira. É o que dá fluidez ao trocar de conversa: o board client
@@ -25,7 +29,10 @@ export async function GET(req: Request) {
   const id = searchParams.get("id");
 
   if (!slug || !kind || !id) {
-    return NextResponse.json({ error: "parâmetros ausentes" }, { status: 400 });
+    return NextResponse.json(
+      { error: "parâmetros ausentes" },
+      { status: 400, headers: SEM_CACHE },
+    );
   }
 
   // Mesmo gate de acesso das telas: negativa cai em notFound (404).
@@ -34,7 +41,10 @@ export async function GET(req: Request) {
   if (kind === "bot") {
     const conversation = await getConversation(slug, id);
     if (!conversation) {
-      return NextResponse.json({ error: "não encontrada" }, { status: 404 });
+      return NextResponse.json(
+        { error: "não encontrada" },
+        { status: 404, headers: SEM_CACHE },
+      );
     }
     const sendEnabled = !!getMetaConfig(agent);
     const [messages, paused, lead, templates] = await Promise.all([
@@ -46,33 +56,51 @@ export async function GET(req: Request) {
     const isPaused = conversation.chat_id
       ? paused.includes(conversation.chat_id)
       : false;
-    return NextResponse.json({
-      kind: "bot",
-      conversation,
-      messages,
-      isPaused,
-      sendEnabled,
-      templates,
-      lead,
-    });
+    return NextResponse.json(
+      {
+        kind: "bot",
+        conversation,
+        messages,
+        isPaused,
+        sendEnabled,
+        templates,
+        lead,
+      },
+      { headers: SEM_CACHE },
+    );
   }
 
   if (kind === "outreach") {
     const convo = await getOutreachConvo(slug, id);
     if (!convo) {
-      return NextResponse.json({ error: "não encontrada" }, { status: 404 });
+      return NextResponse.json(
+        { error: "não encontrada" },
+        { status: 404, headers: SEM_CACHE },
+      );
     }
     const messages = await getOutreachMessages(convo.id);
-    return NextResponse.json({ kind: "outreach", convo, messages });
+    return NextResponse.json(
+      { kind: "outreach", convo, messages },
+      { headers: SEM_CACHE },
+    );
   }
 
   if (kind === "dispatch") {
     const detail = await getDispatchConvo(slug, id);
     if (!detail) {
-      return NextResponse.json({ error: "não encontrada" }, { status: 404 });
+      return NextResponse.json(
+        { error: "não encontrada" },
+        { status: 404, headers: SEM_CACHE },
+      );
     }
-    return NextResponse.json({ kind: "dispatch", detail });
+    return NextResponse.json(
+      { kind: "dispatch", detail },
+      { headers: SEM_CACHE },
+    );
   }
 
-  return NextResponse.json({ error: "kind inválido" }, { status: 400 });
+  return NextResponse.json(
+    { error: "kind inválido" },
+    { status: 400, headers: SEM_CACHE },
+  );
 }

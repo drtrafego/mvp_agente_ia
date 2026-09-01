@@ -92,8 +92,15 @@ const PARAM: Record<BoardKind, "c" | "o" | "d"> = {
 // elas a tela re-renderizaria de graça a cada ciclo, e quem está lendo uma
 // conversa sentiria a piscada.
 function assinaturaLista(itens: BoardItem[]): string {
+  // Tudo que a lista DESENHA entra aqui. Antes só key/data/contagem/título
+  // entravam, e o selo de origem ficava velho na tela: quando a atribuição de
+  // campanha chega depois (o sync casa o telefone com o anúncio horas depois),
+  // a assinatura não mudava e "Direto" continuava no card que já era "Instagram".
   return itens
-    .map((i) => `${i.key}|${i.date ?? ""}|${i.count ?? 0}|${i.title}`)
+    .map(
+      (i) =>
+        `${i.key}|${i.date ?? ""}|${i.count ?? 0}|${i.title}|${i.origin}|${i.originDetail ?? ""}|${i.handle ?? ""}`,
+    )
     .join(";");
 }
 
@@ -107,6 +114,61 @@ function assinaturaPainel(p: PanelPayload): string {
     return `outreach|${p.messages.length}|${ultima?.id ?? ""}|${p.convo.status ?? ""}`;
   }
   return `dispatch|${p.detail.phone_norm}|${p.detail.sent_at ?? ""}`;
+}
+
+/** A entrada atual do histórico é a que este painel empilhou? */
+function entradaDoPainel(): boolean {
+  try {
+    return !!(window.history.state as { painelConversa?: boolean } | null)
+      ?.painelConversa;
+  } catch {
+    return false;
+  }
+}
+
+/** A URL de agora sem os parâmetros de conversa. */
+function urlSemConversa(): URL {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("c");
+  url.searchParams.delete("o");
+  url.searchParams.delete("d");
+  return url;
+}
+
+/**
+ * Sessão vencida NÃO é falta de conexão, e a tela precisa saber a diferença.
+ * Sem sessão a rota respondia 307 para o login, o fetch seguia o redirect e
+ * recebia HTML com status 200: `res.ok` ficava true, o `res.json()` estourava e
+ * o ciclo era contado como queda de rede. O atendente passava horas olhando
+ * dado velho achando que era a internet dele.
+ */
+class SessaoExpirada extends Error {
+  constructor() {
+    super("Sessão expirada");
+    this.name = "SessaoExpirada";
+  }
+}
+
+/**
+ * Um único jeito de ler as rotas do painel, com as três armadilhas cobertas:
+ * redirect não é seguido (senão a tela de login volta como 200), 401/403 viram
+ * sessão expirada, e corpo que não é JSON também: quem responde HTML numa rota
+ * de JSON interceptou a requisição no caminho.
+ */
+async function buscarJson<T>(url: string, sinal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, {
+    cache: "no-store",
+    redirect: "manual",
+    signal: sinal,
+  });
+  if (res.type === "opaqueredirect" || res.status === 401 || res.status === 403) {
+    throw new SessaoExpirada();
+  }
+  if (!res.ok) throw new Error(String(res.status));
+  if (!(res.headers.get("content-type") ?? "").includes("json")) {
+    throw new SessaoExpirada();
+  }
+  return (await res.json()) as T;
 }
 
 export function ConversasBoard({
@@ -181,12 +243,9 @@ export function ConversasBoard({
         setErrorKey((prev) => (prev === key ? null : prev));
       }
       try {
-        const res = await fetch(
+        const data = await buscarJson<PanelPayload>(
           `/api/conversas/panel?slug=${encodeURIComponent(slug)}&kind=${kind}&id=${encodeURIComponent(id)}`,
-          { cache: "no-store" },
         );
-        if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as PanelPayload;
         setCache((prev) => ({ ...prev, [key]: data }));
         setErrorKey((prev) => (prev === key ? null : prev));
       } catch {
@@ -202,71 +261,69 @@ export function ConversasBoard({
     [slug, cache],
   );
 
-  function pushUrl(kind: BoardKind, id: string) {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("c");
-    url.searchParams.delete("o");
-    url.searchParams.delete("d");
+  function abrirUrl(kind: BoardKind, id: string) {
+    const url = urlSemConversa();
     url.searchParams.set(PARAM[kind], id);
-    // Marca a entrada como NOSSA. É o que deixa o botão Voltar do painel usar
-    // history.back() com segurança: entrada nossa dá pra desempilhar, link
-    // direto na conversa não dá.
-    window.history.pushState({ painelConversa: true }, "", url.toString());
+    // UMA entrada por sessão de painel, não uma por conversa. A primeira
+    // abertura empilha (é o que faz o Voltar do SISTEMA fechar o painel);
+    // daí em diante, enquanto a entrada for nossa, só reescrevemos a URL.
+    // Sem isso, quem navegasse 20 conversas precisava de 20 toques no Voltar
+    // pra sair da tela, e no desktop cada clique na lista empilhava uma.
+    const marca = { painelConversa: true };
+    if (entradaDoPainel()) {
+      window.history.replaceState(marca, "", url.toString());
+    } else {
+      window.history.pushState(marca, "", url.toString());
+    }
   }
 
   function select(item: BoardItem) {
     if (active === item.key) return;
     setActive(item.key);
     setErrorKey(null);
-    pushUrl(item.kind, item.id);
+    abrirUrl(item.kind, item.id);
     void load(item.kind, item.id, false);
   }
 
-  // ‼️ 01/09/2026: o botão Voltar do painel, que SÓ EXISTE NO CELULAR
-  // (`lg:hidden`, porque no desktop lista e chat ficam lado a lado), não
-  // funcionava. São DUAS causas empilhadas, e a primeira tentativa de conserto
-  // só enxergou a primeira:
+  // ‼️ O botão Voltar do painel, que SÓ EXISTE NO CELULAR (`lg:hidden`, porque
+  // no desktop lista e chat ficam lado a lado). Ele já quebrou de três jeitos
+  // diferentes, então o histórico das causas fica aqui inteiro:
   //
-  // 1. O botão era um <Link> do Next, e navegação por Link NÃO dispara
-  //    `popstate`. Quem zera a seleção é o handler de popstate abaixo, então
-  //    ele nunca rodava.
+  // 1. Era um <Link> do Next, e navegação por Link NÃO dispara `popstate`.
+  //    Quem zera a seleção é o handler de popstate abaixo, e ele nunca rodava.
   // 2. O efeito que ressincroniza com o servidor depende de
   //    [initialKey, initialPayload]. Quem abre a conversa pela LISTA abre
-  //    client-side (select), e nesse caminho os dois seguem `null` o tempo
-  //    todo. O Link trocava a URL, o servidor devolvia `null` de novo, as
-  //    dependências NÃO mudavam e o efeito não rodava. A URL perdia o `?c=` e o
-  //    painel continuava na tela: o "clico e não faz nada" que ele relatou.
-  //    (Por isso o botão parecia funcionar em link direto pra conversa: ali
-  //    `initialKey` vinha preenchido e a dependência mudava de verdade.)
+  //    client-side, e nesse caminho os dois seguem `null` o tempo todo: o Link
+  //    trocava a URL, o servidor devolvia `null` de novo, as dependências não
+  //    mudavam e o efeito não rodava. A URL perdia o `?c=` e o painel
+  //    continuava na tela.
+  // 3. ‼️ 01/09/2026. A correção de (1) e (2) fechava com `history.back()`,
+  //    confiando na marca `painelConversa` pra saber que a entrada era nossa.
+  //    Passou em 19 testes FORA do iframe e continuou quebrada DENTRO dele,
+  //    que é onde este painel roda de verdade: o middleware declara
+  //    `frame-ancestors` para cliente/clientes.casaldotrafego.com, e o portal
+  //    do cliente enquadra esta tela. `history.state` é POR FRAME, mas
+  //    `history.back()` anda no histórico CONJUNTO do topo. A marca provava
+  //    "a entrada atual do MEU frame é minha", nunca "o topo da pilha conjunta
+  //    é meu". Bastava o portal navegar depois de a conversa abrir: o toque na
+  //    seta desempilhava a entrada DO PORTAL, jogava o portal uma tela pra
+  //    trás e deixava o painel aberto. Era preciso tocar duas vezes.
   //
-  // A correção fecha pelo HISTÓRICO em vez de navegar: `history.back()`
-  // desempilha a entrada que nós mesmos criamos, dispara `popstate` de verdade
-  // e cai no handler que já funcionava. De quebra o Voltar do sistema para de
-  // reabrir a conversa que a pessoa acabou de fechar, que era o que
-  // aconteceria empilhando mais uma entrada com pushState.
+  // Agora fecha sempre no ESTADO e limpa a URL com `replaceState`, que era o
+  // caminho do link direto e o único que passava em todos os cenários.
+  // `replaceState` não mexe no histórico conjunto, então o portal nunca se
+  // move, e um toque basta. A marca continua na entrada de propósito: ela não
+  // diz mais "pode desempilhar", diz "esta entrada é do painel, dá pra
+  // reescrever a URL dela" — é o que impede a próxima conversa de empilhar
+  // outra (ver `abrirUrl`).
   const fecharPainel = React.useCallback(() => {
-    let entradaNossa = false;
-    try {
-      entradaNossa = !!(
-        window.history.state as { painelConversa?: boolean } | null
-      )?.painelConversa;
-    } catch {
-      entradaNossa = false;
-    }
-    if (entradaNossa) {
-      window.history.back();
-      return;
-    }
-    // Link direto na conversa: não existe entrada nossa pra desempilhar. Fecha
-    // na mão e limpa a URL com replaceState, que NÃO empilha entrada nova
-    // (com pushState o Voltar do sistema reabriria a conversa).
     setActive(null);
     try {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("c");
-      url.searchParams.delete("o");
-      url.searchParams.delete("d");
-      window.history.replaceState({}, "", url.toString());
+      window.history.replaceState(
+        entradaDoPainel() ? { painelConversa: true } : {},
+        "",
+        urlSemConversa().toString(),
+      );
     } catch {
       /* URL inválida não pode impedir o painel de fechar */
     }
@@ -311,12 +368,10 @@ export function ConversasBoard({
   const buscarLista = React.useCallback(
     async (sinal: AbortSignal) => {
       const f = filter !== "all" ? `&f=${filter}` : "";
-      const res = await fetch(
+      const { items: novos } = await buscarJson<{ items: BoardItem[] }>(
         `/api/conversas/lista?slug=${encodeURIComponent(slug)}&ch=${ch}${f}`,
-        { cache: "no-store", signal: sinal },
+        sinal,
       );
-      if (!res.ok) throw new Error(String(res.status));
-      const { items: novos } = (await res.json()) as { items: BoardItem[] };
       setItens((antes) =>
         assinaturaLista(antes) === assinaturaLista(novos) ? antes : novos,
       );
@@ -329,12 +384,10 @@ export function ConversasBoard({
       const corte = chave.indexOf(":");
       const kind = chave.slice(0, corte) as BoardKind;
       const id = chave.slice(corte + 1);
-      const res = await fetch(
+      const dado = await buscarJson<PanelPayload>(
         `/api/conversas/panel?slug=${encodeURIComponent(slug)}&kind=${kind}&id=${encodeURIComponent(id)}`,
-        { cache: "no-store", signal: sinal },
+        sinal,
       );
-      if (!res.ok) throw new Error(String(res.status));
-      const dado = (await res.json()) as PanelPayload;
       setCache((antes) => {
         const atual = antes[chave];
         if (atual && assinaturaPainel(atual) === assinaturaPainel(dado)) {
@@ -387,6 +440,7 @@ export function ConversasBoard({
       ultimaAtualizacao: atualizacao.ultimaAtualizacao ?? montadoEm,
       atualizando: atualizacao.atualizando,
       falhasSeguidas: atualizacao.falhasSeguidas,
+      motivo: atualizacao.motivo,
       atualizarAgora: atualizacao.atualizarAgora,
     }),
     [
@@ -394,6 +448,7 @@ export function ConversasBoard({
       atualizacao.ultimaAtualizacao,
       atualizacao.atualizando,
       atualizacao.falhasSeguidas,
+      atualizacao.motivo,
       atualizacao.atualizarAgora,
       montadoEm,
     ],

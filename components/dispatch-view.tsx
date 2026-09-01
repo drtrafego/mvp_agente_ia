@@ -40,7 +40,7 @@ export function DispatchView({
           <button
             type="button"
             onClick={onBack}
-            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            className="grid size-11 shrink-0 place-items-center rounded-xl border border-border text-muted transition-colors hover:text-fg lg:hidden"
             aria-label="Voltar"
           >
             <ArrowLeft className="size-4" />
@@ -49,7 +49,7 @@ export function DispatchView({
           <Link
             href={`${basePath}/conversas?ch=${ch}`}
             scroll={false}
-            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            className="grid size-11 shrink-0 place-items-center rounded-xl border border-border text-muted transition-colors hover:text-fg lg:hidden"
             aria-label="Voltar"
           >
             <ArrowLeft className="size-4" />

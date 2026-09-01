@@ -30,12 +30,21 @@ const TETO_RECUO_MS = 10 * 60 * 1000;
 /** Um ciclo que trava não pode segurar o próximo pra sempre. */
 const TIMEOUT_CICLO_MS = 20 * 1000;
 
+/**
+ * Por que o ciclo falhou. A tela precisa da diferença: "sem conexão" e "sessão
+ * expirada" pedem coisas diferentes da pessoa, e chamar a segunda de primeira
+ * fazia o atendente esperar a internet voltar em vez de entrar de novo.
+ */
+export type MotivoFalha = "rede" | "sessao";
+
 export type EstadoAtualizacao = {
   /** Quando o último ciclo deu certo. `null` antes do primeiro. */
   ultimaAtualizacao: Date | null;
   atualizando: boolean;
   /** Zera no primeiro sucesso. Alimenta o recuo progressivo e o aviso na tela. */
   falhasSeguidas: number;
+  /** Causa da última falha. `null` enquanto está tudo certo. */
+  motivo: MotivoFalha | null;
   /** Dispara um ciclo agora (clique no indicador, por exemplo). */
   atualizarAgora: () => void;
 };
@@ -64,7 +73,13 @@ export function useAtualizacaoAutomatica({
     ultimaAtualizacao: Date | null;
     atualizando: boolean;
     falhasSeguidas: number;
-  }>({ ultimaAtualizacao: null, atualizando: false, falhasSeguidas: 0 });
+    motivo: MotivoFalha | null;
+  }>({
+    ultimaAtualizacao: null,
+    atualizando: false,
+    falhasSeguidas: 0,
+    motivo: null,
+  });
 
   // A função vive numa ref pra trocar de identidade sem reiniciar a corrente:
   // ela depende da conversa aberta, que muda a toda hora.
@@ -91,15 +106,39 @@ export function useAtualizacaoAutomatica({
       }, ms);
     }
 
+    /** Espera até a próxima tentativa: 1x, 2x, 4x, 8x o intervalo, com teto. */
+    function recuo(): number {
+      return Math.min(intervaloMs * 2 ** Math.min(falhas, 3), TETO_RECUO_MS);
+    }
+
+    function anotarFalha(motivo: MotivoFalha) {
+      falhas += 1;
+      if (vivo) {
+        setEstado((e) => ({
+          ...e,
+          atualizando: false,
+          falhasSeguidas: falhas,
+          motivo,
+        }));
+      }
+    }
+
     async function executar() {
       if (!vivo || rodando) return;
-      // Ninguém olhando, ou sem rede: não gasta requisição. Quando a aba
-      // voltar, o listener abaixo dispara um ciclo na hora.
-      if (
-        document.visibilityState !== "visible" ||
-        navigator.onLine === false
-      ) {
+      // Aba escondida é pausa de verdade: ninguém está olhando, e voltar pra
+      // aba dispara um ciclo na hora. Não é falha, não conta.
+      if (document.visibilityState !== "visible") {
         agendar(intervaloMs);
+        return;
+      }
+      // ‼️ Sem rede, NÃO gasta requisição mas CONTA como falha. Antes saía
+      // calado por aqui: `ultimaAtualizacao` ficava parada, `falhasSeguidas`
+      // ficava em 0, e a tela seguia exibindo "atualizado às 14:32" enquanto o
+      // dado envelhecia sem ninguém avisar. O carimbo de frescor tem que
+      // CALAR quando não sabe, nunca mentir.
+      if (navigator.onLine === false) {
+        anotarFalha("rede");
+        agendar(recuo());
         return;
       }
 
@@ -115,46 +154,50 @@ export function useAtualizacaoAutomatica({
             ultimaAtualizacao: new Date(),
             atualizando: false,
             falhasSeguidas: 0,
+            motivo: null,
           });
         }
-      } catch {
-        // Ciclo perdido NÃO limpa a tela: o dado anterior continua valendo e a
-        // pessoa nem fica sabendo, a não ser pelo aviso discreto do indicador.
-        falhas += 1;
-        if (vivo) {
-          setEstado((e) => ({
-            ...e,
-            atualizando: false,
-            falhasSeguidas: falhas,
-          }));
-        }
+      } catch (e) {
+        // Ciclo perdido NÃO limpa a tela: o dado anterior continua valendo, e o
+        // indicador diz o que houve. Quem lança SessaoExpirada é o board.
+        anotarFalha(
+          (e as { name?: string } | null)?.name === "SessaoExpirada"
+            ? "sessao"
+            : "rede",
+        );
       } finally {
         clearTimeout(corta);
         controle = null;
         rodando = false;
-        if (vivo) {
-          agendar(
-            Math.min(intervaloMs * 2 ** Math.min(falhas, 3), TETO_RECUO_MS),
-          );
-        }
+        if (vivo) agendar(recuo());
       }
     }
 
-    function aoVoltar() {
-      if (document.visibilityState === "visible") agendar(0);
+    function aoVisibilidade() {
+      if (document.visibilityState !== "visible") return;
+      // ‼️ Com o servidor no chão, trocar de aba não pode cancelar o recuo:
+      // `agendar(0)` a cada volta virava uma requisição imediata num servidor
+      // que já está caído. Sem falha nenhuma, atualiza na hora, que é o ponto
+      // do recurso.
+      agendar(falhas === 0 ? 0 : recuo());
+    }
+
+    function aoConectar() {
+      // A rede mudou de estado de verdade: tentar na hora é o certo.
+      agendar(0);
     }
 
     agendar(intervaloMs);
-    document.addEventListener("visibilitychange", aoVoltar);
-    window.addEventListener("online", aoVoltar);
+    document.addEventListener("visibilitychange", aoVisibilidade);
+    window.addEventListener("online", aoConectar);
     forcarRef.current = () => agendar(0);
 
     return () => {
       vivo = false;
       if (timer) clearTimeout(timer);
       controle?.abort();
-      document.removeEventListener("visibilitychange", aoVoltar);
-      window.removeEventListener("online", aoVoltar);
+      document.removeEventListener("visibilitychange", aoVisibilidade);
+      window.removeEventListener("online", aoConectar);
       forcarRef.current = () => {};
     };
   }, [ativo, intervaloMs]);

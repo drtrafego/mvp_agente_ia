@@ -68,7 +68,7 @@ export function ChatView({
           <button
             type="button"
             onClick={onBack}
-            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            className="grid size-11 shrink-0 place-items-center rounded-xl border border-border text-muted transition-colors hover:text-fg lg:hidden"
             aria-label="Voltar"
           >
             <ArrowLeft className="size-4" />
@@ -77,7 +77,7 @@ export function ChatView({
           <Link
             href={`${basePath}/conversas`}
             scroll={false}
-            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            className="grid size-11 shrink-0 place-items-center rounded-xl border border-border text-muted transition-colors hover:text-fg lg:hidden"
             aria-label="Voltar"
           >
             <ArrowLeft className="size-4" />
@@ -134,7 +134,16 @@ export function ChatView({
         )}
       </div>
 
+      {/* ‼️ 01/09/2026. Sem `key`, o React reaproveitava a MESMA instância ao
+          trocar de conversa e o estado interno vinha junto: o rascunho escrito
+          pro cliente A continuava no campo depois de abrir o cliente B (um
+          Enter mandava a mensagem pro WhatsApp errado), e o `sent`, as
+          respostas enviadas agora, aparecia dentro da conversa de outra
+          pessoa. `sent` é o ÚNICO lugar onde o atendente vê a própria resposta,
+          porque o sync do banco só roda de 15 em 15 minutos. Trocou de sessão,
+          o componente nasce de novo. */}
       <ChatControls
+        key={conversation.session_id}
         slug={slug}
         chatId={conversation.chat_id}
         isPaused={isPaused}

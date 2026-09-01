@@ -286,6 +286,26 @@ function classificarOrigem(r: OrigemRow): {
 }
 
 /**
+ * ‼️ 01/09/2026. As três consultas da lista de Conversas engoliam a exceção e
+ * devolviam []. A rota juntava as três e respondia 200: com a consulta do bot
+ * estourando, o atendente via 14 conversas virarem 0, a tela carimbava
+ * "atualizado às HH:MM" e ainda escrevia "Este agente ainda não registrou
+ * atendimentos". Antes isso só mordia num F5 na mão; com a atualização
+ * automática passaria a acontecer sozinho a cada 2 minutos, em toda aba aberta.
+ *
+ * Agora elas propagam, e a rota responde 5xx (a tela cai no recuo, que já
+ * funciona). Com UMA exceção deliberada: tabela ou schema que NÃO EXISTE é
+ * estrutura, não falha. As tabelas de prospecção e de disparo são criadas fora
+ * deste repositório, e agente sem elas simplesmente não tem essa lista, que é
+ * exatamente o que [] significa. Timeout, conexão e lock viram "não sei", e
+ * "não sei" nunca mais vira lista vazia carimbada de atualizada.
+ */
+function tabelaAusente(e: unknown): boolean {
+  const code = (e as { code?: string } | null)?.code;
+  return code === "42P01" || code === "3F000";
+}
+
+/**
  * Conversas do bot (Hermes) do canal pedido, já com a origem resolvida.
  * whatsapp = tudo que não é e-mail; email = channel que contém "mail".
  * filter:
@@ -384,10 +404,11 @@ export async function getBotConversations(
     return rows.map((r) => ({ ...r, ...classificarOrigem(r) }));
   } catch (e) {
     console.error(
-      `[conversas] origem falhou (agente ${slug}, canal ${channel}):`,
+      `[conversas] conversas do bot falharam (agente ${slug}, canal ${channel}):`,
       e instanceof Error ? e.message : e,
     );
-    return [];
+    if (tabelaAusente(e)) return [];
+    throw e;
   }
 }
 
@@ -436,8 +457,13 @@ export async function getOutreachConvos(
        order by oc.last_at desc nulls last`,
       [slug, channel],
     );
-  } catch {
-    return [];
+  } catch (e) {
+    console.error(
+      `[conversas] prospecção falhou (agente ${slug}, canal ${channel}):`,
+      e instanceof Error ? e.message : e,
+    );
+    if (tabelaAusente(e)) return [];
+    throw e;
   }
 }
 
@@ -535,8 +561,13 @@ export async function getDispatchConvos(
        order by os.phone_norm, os.sent_at desc`,
       params,
     );
-  } catch {
-    return [];
+  } catch (e) {
+    console.error(
+      `[conversas] disparos falharam (agente ${slug}, canal ${channel}):`,
+      e instanceof Error ? e.message : e,
+    );
+    if (tabelaAusente(e)) return [];
+    throw e;
   }
 }
 

@@ -122,7 +122,27 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  // 4. Sem sessão válida, vai para o login. O gate de senha compartilhada
+  // 4. ‼️ Rota de API sem sessão responde 401, e NÃO redirect (01/09/2026).
+  //    O `fetch` do browser SEGUE o 307 sozinho, recebe a tela de login e
+  //    entrega isso como status 200: `res.ok` fica true, o `res.json()`
+  //    estoura no meio do caminho e a tela contava o ciclo como queda de rede.
+  //    O atendente passava horas olhando dado velho achando que o problema era
+  //    a internet dele. Quem chama /api espera JSON, e 401 é a única resposta
+  //    que diz a verdade.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      { error: "sessão expirada" },
+      {
+        status: 401,
+        headers: {
+          "Content-Security-Policy": CSP_FRAME_ANCESTORS,
+          "Cache-Control": "private, no-store",
+        },
+      },
+    );
+  }
+
+  // 5. Sem sessão válida, vai para o login. O gate de senha compartilhada
   //    (DASHBOARD_PASSWORD) foi removido: o isolamento por empresa depende do
   //    email do usuário, e senha compartilhada não tem email.
   //
