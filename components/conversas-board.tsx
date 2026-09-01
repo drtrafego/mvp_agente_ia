@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  ConvFilter,
   ConversationRow,
   MessageRow,
   MetaLead,
@@ -23,16 +24,24 @@ import type {
 } from "@/lib/queries";
 import type { ApprovedTemplate } from "@/lib/actions";
 import { Badge } from "@/components/ui";
+import { ConversasContexto } from "@/components/status-atualizacao";
+import { useAtualizacaoAutomatica } from "@/lib/use-atualizacao-automatica";
 import { ChatView } from "@/components/chat-view";
 import { OutreachChat } from "@/components/outreach-chat";
 import { DispatchView } from "@/components/dispatch-view";
 import { LeadCard } from "@/components/lead-card";
 import { cn, formatNumber, timeAgo } from "@/lib/utils";
 
+// Cor por FAMÍLIA de origem, não por rótulo: mídia paga da Meta puxa o mesmo
+// tom (o cliente lê "veio de anúncio" de relance), saída ativa nossa puxa
+// outro, e quem chegou sozinho fica neutro.
 const ORIGIN_TONE: Record<
   ConvOrigin,
   "secondary" | "violet" | "neutral" | "accent"
 > = {
+  Instagram: "secondary",
+  Facebook: "secondary",
+  "Meta Ads": "secondary",
   Anúncio: "secondary",
   Prospecção: "violet",
   Disparo: "accent",
@@ -48,6 +57,8 @@ export type BoardItem = {
   title: string;
   handle: string | null;
   origin: ConvOrigin;
+  /** Caminho e campanha da origem, quando o dado existe. */
+  originDetail?: string | null;
   date: string | null;
   count: number | null;
 };
@@ -75,10 +86,34 @@ const PARAM: Record<BoardKind, "c" | "o" | "d"> = {
   dispatch: "d",
 };
 
+// O dado só muda quando o sync roda (de 15 em 15 min), então a maioria dos
+// ciclos de atualização devolve exatamente a mesma coisa. Estas duas
+// assinaturas existem pra reconhecer isso e NÃO trocar o estado à toa: sem
+// elas a tela re-renderizaria de graça a cada ciclo, e quem está lendo uma
+// conversa sentiria a piscada.
+function assinaturaLista(itens: BoardItem[]): string {
+  return itens
+    .map((i) => `${i.key}|${i.date ?? ""}|${i.count ?? 0}|${i.title}`)
+    .join(";");
+}
+
+function assinaturaPainel(p: PanelPayload): string {
+  if (p.kind === "bot") {
+    const ultima = p.messages[p.messages.length - 1];
+    return `bot|${p.messages.length}|${ultima?.id ?? ""}|${p.isPaused}|${p.conversation.title ?? ""}`;
+  }
+  if (p.kind === "outreach") {
+    const ultima = p.messages[p.messages.length - 1];
+    return `outreach|${p.messages.length}|${ultima?.id ?? ""}|${p.convo.status ?? ""}`;
+  }
+  return `dispatch|${p.detail.phone_norm}|${p.detail.sent_at ?? ""}`;
+}
+
 export function ConversasBoard({
   slug,
   basePath,
   ch,
+  filter,
   items,
   initialKey,
   initialPayload,
@@ -88,6 +123,8 @@ export function ConversasBoard({
   slug: string;
   basePath: string;
   ch: ConvChannel;
+  /** Precisa vir junto: a atualização automática refaz a MESMA consulta. */
+  filter: ConvFilter;
   items: BoardItem[];
   initialKey: string | null;
   initialPayload: PanelPayload | null;
@@ -95,17 +132,24 @@ export function ConversasBoard({
   header?: React.ReactNode;
 }) {
   const [search, setSearch] = React.useState("");
+  // A lista vira estado do CLIENTE porque ela se atualiza sozinha. O servidor
+  // manda a primeira, e depois manda de novo em toda navegação real (troca de
+  // aba/filtro, "Atualizar agora"): nesses casos a dele vale.
+  const [itens, setItens] = React.useState<BoardItem[]>(items);
+  React.useEffect(() => {
+    setItens(items);
+  }, [items]);
   // Filtra a lista por nome ou contato (email/telefone). Busca em tudo que já
   // veio (as queries não têm limite), então acha qualquer conversa.
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(
+    if (!q) return itens;
+    return itens.filter(
       (it) =>
         it.title.toLowerCase().includes(q) ||
         (it.handle ?? "").toLowerCase().includes(q),
     );
-  }, [items, search]);
+  }, [itens, search]);
   const [active, setActive] = React.useState<string | null>(initialKey);
   const [cache, setCache] = React.useState<Record<string, PanelPayload>>(() =>
     initialKey && initialPayload ? { [initialKey]: initialPayload } : {},
@@ -164,7 +208,10 @@ export function ConversasBoard({
     url.searchParams.delete("o");
     url.searchParams.delete("d");
     url.searchParams.set(PARAM[kind], id);
-    window.history.pushState(null, "", url.toString());
+    // Marca a entrada como NOSSA. É o que deixa o botão Voltar do painel usar
+    // history.back() com segurança: entrada nossa dá pra desempilhar, link
+    // direto na conversa não dá.
+    window.history.pushState({ painelConversa: true }, "", url.toString());
   }
 
   function select(item: BoardItem) {
@@ -174,6 +221,56 @@ export function ConversasBoard({
     pushUrl(item.kind, item.id);
     void load(item.kind, item.id, false);
   }
+
+  // ‼️ 01/09/2026: o botão Voltar do painel, que SÓ EXISTE NO CELULAR
+  // (`lg:hidden`, porque no desktop lista e chat ficam lado a lado), não
+  // funcionava. São DUAS causas empilhadas, e a primeira tentativa de conserto
+  // só enxergou a primeira:
+  //
+  // 1. O botão era um <Link> do Next, e navegação por Link NÃO dispara
+  //    `popstate`. Quem zera a seleção é o handler de popstate abaixo, então
+  //    ele nunca rodava.
+  // 2. O efeito que ressincroniza com o servidor depende de
+  //    [initialKey, initialPayload]. Quem abre a conversa pela LISTA abre
+  //    client-side (select), e nesse caminho os dois seguem `null` o tempo
+  //    todo. O Link trocava a URL, o servidor devolvia `null` de novo, as
+  //    dependências NÃO mudavam e o efeito não rodava. A URL perdia o `?c=` e o
+  //    painel continuava na tela: o "clico e não faz nada" que ele relatou.
+  //    (Por isso o botão parecia funcionar em link direto pra conversa: ali
+  //    `initialKey` vinha preenchido e a dependência mudava de verdade.)
+  //
+  // A correção fecha pelo HISTÓRICO em vez de navegar: `history.back()`
+  // desempilha a entrada que nós mesmos criamos, dispara `popstate` de verdade
+  // e cai no handler que já funcionava. De quebra o Voltar do sistema para de
+  // reabrir a conversa que a pessoa acabou de fechar, que era o que
+  // aconteceria empilhando mais uma entrada com pushState.
+  const fecharPainel = React.useCallback(() => {
+    let entradaNossa = false;
+    try {
+      entradaNossa = !!(
+        window.history.state as { painelConversa?: boolean } | null
+      )?.painelConversa;
+    } catch {
+      entradaNossa = false;
+    }
+    if (entradaNossa) {
+      window.history.back();
+      return;
+    }
+    // Link direto na conversa: não existe entrada nossa pra desempilhar. Fecha
+    // na mão e limpa a URL com replaceState, que NÃO empilha entrada nova
+    // (com pushState o Voltar do sistema reabriria a conversa).
+    setActive(null);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("c");
+      url.searchParams.delete("o");
+      url.searchParams.delete("d");
+      window.history.replaceState({}, "", url.toString());
+    } catch {
+      /* URL inválida não pode impedir o painel de fechar */
+    }
+  }, []);
 
   // Back/forward do navegador: mantém painel e URL em sincronia.
   React.useEffect(() => {
@@ -197,16 +294,122 @@ export function ConversasBoard({
     return () => window.removeEventListener("popstate", onPop);
   }, [load]);
 
+  // ---- Atualização automática (01/09/2026) --------------------------------
+  // Pedido do dono: "o pessoal está tendo que apertar F5". Duas frentes, uma
+  // barata e outra baratíssima, propositalmente SEPARADAS: quem está só na
+  // lista paga 1 requisição por ciclo, quem está com conversa aberta paga 2.
+  //
+  // Não usa router.refresh() de propósito. O refresh do servidor re-renderiza
+  // a página inteira e, quando existe `?c=`, refaz TAMBÉM as consultas do
+  // painel: sairia mais caro que estas duas rotas e ainda mexeria na seleção
+  // no meio da leitura.
+  const activeRef = React.useRef(active);
+  React.useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  const buscarLista = React.useCallback(
+    async (sinal: AbortSignal) => {
+      const f = filter !== "all" ? `&f=${filter}` : "";
+      const res = await fetch(
+        `/api/conversas/lista?slug=${encodeURIComponent(slug)}&ch=${ch}${f}`,
+        { cache: "no-store", signal: sinal },
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const { items: novos } = (await res.json()) as { items: BoardItem[] };
+      setItens((antes) =>
+        assinaturaLista(antes) === assinaturaLista(novos) ? antes : novos,
+      );
+    },
+    [slug, ch, filter],
+  );
+
+  const recarregarPainel = React.useCallback(
+    async (chave: string, sinal: AbortSignal) => {
+      const corte = chave.indexOf(":");
+      const kind = chave.slice(0, corte) as BoardKind;
+      const id = chave.slice(corte + 1);
+      const res = await fetch(
+        `/api/conversas/panel?slug=${encodeURIComponent(slug)}&kind=${kind}&id=${encodeURIComponent(id)}`,
+        { cache: "no-store", signal: sinal },
+      );
+      if (!res.ok) throw new Error(String(res.status));
+      const dado = (await res.json()) as PanelPayload;
+      setCache((antes) => {
+        const atual = antes[chave];
+        if (atual && assinaturaPainel(atual) === assinaturaPainel(dado)) {
+          return antes;
+        }
+        return { ...antes, [chave]: dado };
+      });
+    },
+    [slug],
+  );
+
+  const atualizar = React.useCallback(
+    async (sinal: AbortSignal) => {
+      const chave = activeRef.current;
+      // Conversa que foi só pré-carregada no hover envelhece calada. A cada
+      // ciclo só sobrevive a que está aberta, que é recarregada logo abaixo:
+      // assim ninguém abre uma da lista e lê mensagem velha.
+      setCache((antes) => {
+        const chaves = Object.keys(antes);
+        if (chave) {
+          if (chaves.length === 1 && chaves[0] === chave) return antes;
+          return antes[chave] ? { [chave]: antes[chave] } : {};
+        }
+        return chaves.length === 0 ? antes : {};
+      });
+      const [lista] = await Promise.allSettled([
+        buscarLista(sinal),
+        chave ? recarregarPainel(chave, sinal) : Promise.resolve(),
+      ]);
+      // A lista é o sinal de saúde do ciclo. O painel falhar sozinho (conversa
+      // apagada, por exemplo) não pode jogar a tela inteira no recuo.
+      if (lista.status === "rejected") throw lista.reason;
+    },
+    [buscarLista, recarregarPainel],
+  );
+
+  const atualizacao = useAtualizacaoAutomatica({ aoAtualizar: atualizar });
+
+  // Sem isto o indicador ficaria sem horário até o primeiro ciclo (2 min de
+  // tela muda). Marcado em efeito, no cliente, pra não divergir do servidor
+  // na hidratação.
+  const [montadoEm, setMontadoEm] = React.useState<Date | null>(null);
+  React.useEffect(() => {
+    setMontadoEm(new Date());
+  }, []);
+
+  const info = React.useMemo(
+    () => ({
+      total: itens.length,
+      ultimaAtualizacao: atualizacao.ultimaAtualizacao ?? montadoEm,
+      atualizando: atualizacao.atualizando,
+      falhasSeguidas: atualizacao.falhasSeguidas,
+      atualizarAgora: atualizacao.atualizarAgora,
+    }),
+    [
+      itens.length,
+      atualizacao.ultimaAtualizacao,
+      atualizacao.atualizando,
+      atualizacao.falhasSeguidas,
+      atualizacao.atualizarAgora,
+      montadoEm,
+    ],
+  );
+
   const anySelected = active !== null;
   const payload = active ? cache[active] : undefined;
   const activeLoading = active !== null && !payload && loadingKey === active;
   const activeError = active !== null && !payload && errorKey === active;
-  const activeItem = active ? items.find((i) => i.key === active) ?? null : null;
+  const activeItem = active ? itens.find((i) => i.key === active) ?? null : null;
   const lead =
     payload && payload.kind === "bot" ? payload.lead : null;
   const showLeadAside = !!(payload && payload.kind === "bot");
 
   return (
+    <ConversasContexto.Provider value={info}>
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* Cabeçalho (título + abas + filtros): some no CELULAR quando uma conversa
           está aberta, pra dar tela cheia ao chat. No desktop fica sempre. */}
@@ -230,21 +433,21 @@ export function ConversasBoard({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por nome, email ou telefone…"
-              className="w-full rounded-lg border border-border bg-surface-2 pl-8 pr-8 py-2 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
+              className="w-full rounded-lg border border-border bg-surface-2 pl-8 pr-10 py-2 text-sm text-fg outline-none placeholder:text-muted-2 focus:border-secondary/50"
             />
             {search ? (
               <button
                 type="button"
                 onClick={() => setSearch("")}
                 aria-label="Limpar busca"
-                className="absolute right-2 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-muted-2 hover:text-fg"
+                className="absolute right-1.5 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-md text-muted-2 hover:text-fg"
               >
                 <X className="size-3.5" />
               </button>
             ) : null}
           </div>
         </div>
-        {items.length === 0 ? (
+        {itens.length === 0 ? (
           <EmptyList channel={ch} />
         ) : filtered.length === 0 ? (
           <div className="grid flex-1 place-items-center p-6 text-center text-sm text-muted-2">
@@ -275,11 +478,26 @@ export function ConversasBoard({
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-center gap-2 text-xs text-muted">
-                  <Badge tone={ORIGIN_TONE[it.origin]}>{it.origin}</Badge>
+                  <Badge
+                    tone={ORIGIN_TONE[it.origin]}
+                    title={it.originDetail ?? undefined}
+                  >
+                    {it.origin}
+                  </Badge>
                   <span className="tnum truncate">
                     {it.handle ?? "sem contato"}
                   </span>
                 </div>
+                {/* Anúncio e campanha embaixo do selo: a plataforma responde
+                    "de onde veio", esta linha responde "de qual criativo". */}
+                {it.originDetail ? (
+                  <p
+                    className="mt-1 truncate text-[11px] text-muted-2"
+                    title={it.originDetail}
+                  >
+                    {it.originDetail}
+                  </p>
+                ) : null}
                 <div className="mt-2 text-[11px] text-muted-2">
                   <span className="tnum">
                     {formatNumber(it.count ?? 0)} mensagens
@@ -310,6 +528,7 @@ export function ConversasBoard({
                 sendEnabled={payload.sendEnabled}
                 templates={payload.templates}
                 canSeeCost={canSeeCost}
+                onBack={fecharPainel}
               />
             </div>
           ) : payload.kind === "outreach" ? (
@@ -319,11 +538,17 @@ export function ConversasBoard({
                 ch={ch}
                 convo={payload.convo}
                 messages={payload.messages}
+                onBack={fecharPainel}
               />
             </div>
           ) : (
             <div className="min-h-0 flex-1">
-              <DispatchView basePath={basePath} ch={ch} detail={payload.detail} />
+              <DispatchView
+                basePath={basePath}
+                ch={ch}
+                detail={payload.detail}
+                onBack={fecharPainel}
+              />
             </div>
           )
         ) : activeError ? (
@@ -347,6 +572,7 @@ export function ConversasBoard({
       ) : null}
       </div>
     </div>
+    </ConversasContexto.Provider>
   );
 }
 

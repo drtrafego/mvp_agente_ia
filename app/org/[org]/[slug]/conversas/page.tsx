@@ -1,29 +1,26 @@
 import Link from "next/link";
 import { MessageCircle, Mail } from "lucide-react";
 import {
-  getBotConversations,
   getConversation,
   getMessages,
   getLeadForConversation,
-  getOutreachConvos,
   getOutreachConvo,
   getOutreachMessages,
-  getDispatchConvos,
   getDispatchConvo,
   type ConvChannel,
-  type ConvOrigin,
   type ConvFilter,
 } from "@/lib/queries";
+import { montarListaConversas } from "@/lib/conversas-lista";
 import {
   ConversasBoard,
-  type BoardItem,
   type PanelPayload,
 } from "@/components/conversas-board";
+import { StatusAtualizacao } from "@/components/status-atualizacao";
 import { getPausedChatIds, getApprovedTemplates } from "@/lib/actions";
 import { assertAgentAccess, getSessionEmail } from "@/lib/access";
 import { isSuperAdmin } from "@/lib/admin";
 import { getMetaConfig } from "@/lib/meta-config";
-import { cn, formatNumber } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -51,11 +48,8 @@ export default async function ConversasPage({
   const filter: ConvFilter =
     fParam === "ativas24h" || fParam === "responderam" ? fParam : "all";
 
-  const [botConvos, outreachConvos, dispatchConvos] = await Promise.all([
-    getBotConversations(slug, ch, filter),
-    getOutreachConvos(slug, ch, filter),
-    getDispatchConvos(slug, ch, filter),
-  ]);
+  // A MESMA montagem que /api/conversas/lista usa na atualização automática.
+  const items = await montarListaConversas(slug, ch, filter);
 
   const sendEnabled = !!getMetaConfig(agent);
 
@@ -103,53 +97,13 @@ export default async function ConversasPage({
     }
   }
 
-  const items: BoardItem[] = [
-    ...botConvos.map((cv) => ({
-      key: `bot:${cv.session_id}`,
-      kind: "bot" as const,
-      id: cv.session_id,
-      title: cv.title ?? "Conversa sem título",
-      handle: cv.chat_id,
-      origin: cv.origin,
-      // ordena pela ULTIMA mensagem, nao pela primeira (24/08): uma conversa
-      // antiga que acabou de receber mensagem tem que subir pro topo, igual
-      // WhatsApp. Antes, uma conversa iniciada dia 16 ficava enterrada mesmo
-      // com resposta de agora, e o dono nao via o que estava acontecendo.
-      date: cv.ended_at ?? cv.started_at,
-      count: cv.message_count,
-    })),
-    ...outreachConvos.map((oc) => ({
-      key: `outreach:${oc.id}`,
-      kind: "outreach" as const,
-      id: oc.id,
-      title: oc.lead_name ?? oc.lead_handle ?? "Lead",
-      handle: oc.lead_handle,
-      origin: "Prospecção" as ConvOrigin,
-      date: oc.last_at,
-      count: oc.msg_count,
-    })),
-    ...dispatchConvos.map((dc) => ({
-      key: `dispatch:${dc.phone_norm}`,
-      kind: "dispatch" as const,
-      id: dc.phone_norm,
-      title: dc.full_name ?? dc.phone_norm,
-      handle: dc.phone_norm,
-      origin: "Disparo" as ConvOrigin,
-      date: dc.sent_at,
-      count: 1,
-    })),
-  ].sort((a, b) => {
-    const da = a.date ? new Date(a.date).getTime() : 0;
-    const db = b.date ? new Date(b.date).getTime() : 0;
-    return db - da;
-  });
-
   return (
-    <div className="animate-fade-in flex h-[calc(100dvh-3.5rem)] flex-col p-3 sm:p-4 lg:h-dvh">
+    <div className="animate-fade-in flex min-h-[calc(100dvh-3.5rem-var(--pausebar,0px))] flex-col p-3 sm:p-4 lg:min-h-[calc(100dvh-var(--pausebar,0px))]">
       <ConversasBoard
         slug={slug}
         basePath={basePath}
         ch={ch}
+        filter={filter}
         items={items}
         initialKey={initialKey}
         initialPayload={initialPayload}
@@ -160,9 +114,9 @@ export default async function ConversasPage({
               <h1 className="text-gradient text-lg font-semibold tracking-tight sm:text-xl">
                 Conversas
               </h1>
-              <span className="text-xs text-muted">
-                {formatNumber(items.length)} nesta aba
-              </span>
+              {/* O contador vem do CLIENTE: ele muda sozinho junto com a
+                  lista. Aqui no servidor ele congelaria na primeira carga. */}
+              <StatusAtualizacao />
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <ChannelTabs basePath={basePath} ch={ch} filter={filter} />

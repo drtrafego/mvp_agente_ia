@@ -1,3 +1,6 @@
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft, Bot, User, DollarSign, FileText } from "lucide-react";
 import type { ConversationRow, MessageRow } from "@/lib/queries";
@@ -17,6 +20,7 @@ export function ChatView({
   sendEnabled,
   templates,
   canSeeCost = false,
+  onBack,
 }: {
   slug: string;
   /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
@@ -28,18 +32,57 @@ export function ChatView({
   templates: ApprovedTemplate[];
   /** Custo de IA só aparece para o super admin (dono). */
   canSeeCost?: boolean;
+  onBack?: () => void;
 }) {
+  // ÂNCORA DE SCROLL (01/09/2026, junto com a atualização automática).
+  // Com a tela se atualizando sozinha, mensagem nova não pode arrastar quem
+  // está lendo mensagem antiga. Regra: só desce sozinho quem JÁ estava no fim.
+  const areaRef = React.useRef<HTMLDivElement>(null);
+  const coladoNoFim = React.useRef(true);
+  const sessaoRef = React.useRef<string | null>(null);
+  const ultimaId = messages[messages.length - 1]?.id ?? null;
+
+  React.useLayoutEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    // Conversa nova abre na mensagem mais recente, que é o que se espera de um
+    // chat (e sem isso a pessoa abriria no topo e nunca veria o que chegou).
+    if (sessaoRef.current !== conversation.session_id) {
+      sessaoRef.current = conversation.session_id;
+      coladoNoFim.current = true;
+    }
+    if (coladoNoFim.current) el.scrollTop = el.scrollHeight;
+  }, [conversation.session_id, ultimaId]);
+
+  function aoRolar() {
+    const el = areaRef.current;
+    if (!el) return;
+    // 64px de folga: "quase no fim" já conta como fim.
+    coladoNoFim.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
       <div className="flex items-start gap-3 border-b border-border px-3 py-3 sm:px-4 sm:py-3.5">
-        <Link
-          href={`${basePath}/conversas`}
-          scroll={false}
-          className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
-          aria-label="Voltar"
-        >
-          <ArrowLeft className="size-4" />
-        </Link>
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+        ) : (
+          <Link
+            href={`${basePath}/conversas`}
+            scroll={false}
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </Link>
+        )}
         <div className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-3 text-muted">
           <ChannelIcon channel={conversation.channel} className="size-4" />
         </div>
@@ -66,7 +109,11 @@ export function ChatView({
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3 sm:p-6">
+      <div
+        ref={areaRef}
+        onScroll={aoRolar}
+        className="flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-3 sm:p-6"
+      >
         {messages.length === 0 ? (
           <p className="mt-8 text-center text-sm text-muted-2">
             Nenhuma mensagem registrada nesta conversa.

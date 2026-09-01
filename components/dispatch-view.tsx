@@ -19,11 +19,14 @@ export function DispatchView({
   basePath,
   ch,
   detail,
+  onBack,
 }: {
   /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
   basePath: string;
   ch: ConvChannel;
   detail: DispatchDetail;
+  /** Fecha o painel sem navegar. Ver o comentário em conversas-board.tsx. */
+  onBack?: () => void;
 }) {
   const name = detail.full_name ?? detail.phone_norm;
   const reconstructed = detail.body
@@ -33,14 +36,25 @@ export function DispatchView({
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
       <div className="flex items-start gap-3 border-b border-border px-4 py-3.5">
-        <Link
-          href={`${basePath}/conversas?ch=${ch}`}
-          scroll={false}
-          className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
-          aria-label="Voltar"
-        >
-          <ArrowLeft className="size-4" />
-        </Link>
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+        ) : (
+          <Link
+            href={`${basePath}/conversas?ch=${ch}`}
+            scroll={false}
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </Link>
+        )}
         <div className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-3 text-muted">
           <MessageCircle className="size-4" />
         </div>

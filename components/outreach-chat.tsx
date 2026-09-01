@@ -9,12 +9,15 @@ export function OutreachChat({
   ch,
   convo,
   messages,
+  onBack,
 }: {
   /** Prefixo de rota do agente: /org/<empresa>/<agente>. */
   basePath: string;
   ch: ConvChannel;
   convo: OutreachConvo;
   messages: OutreachMsg[];
+  /** Fecha o painel sem navegar. Ver o comentário em conversas-board.tsx. */
+  onBack?: () => void;
 }) {
   const isEmail = convo.channel === "email";
   const name = convo.lead_name ?? convo.lead_handle ?? "Lead";
@@ -22,14 +25,25 @@ export function OutreachChat({
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border glass shadow-soft">
       <div className="flex items-start gap-3 border-b border-border px-4 py-3.5">
-        <Link
-          href={`${basePath}/conversas?ch=${ch}`}
-          scroll={false}
-          className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
-          aria-label="Voltar"
-        >
-          <ArrowLeft className="size-4" />
-        </Link>
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </button>
+        ) : (
+          <Link
+            href={`${basePath}/conversas?ch=${ch}`}
+            scroll={false}
+            className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border border-border text-muted transition-colors hover:text-fg lg:hidden"
+            aria-label="Voltar"
+          >
+            <ArrowLeft className="size-4" />
+          </Link>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="truncate font-semibold">{name}</h2>
