@@ -21,6 +21,16 @@ import { expandCampaignVars, resolveVarCount } from "./utils";
 const BASE_URL =
   process.env.HERMES_PANEL_URL ?? "https://hermes.casaldotrafego.com/agente";
 
+// Agentes que NÃO rodam em container Hermes: a mensagem manual vai para a
+// ponte do WhatsApp, que envia pela Cloud API e SÓ ENTÃO grava no histórico
+// do lead, marcada como humana. Enviar direto na Graph API daqui fazia a
+// mensagem sumir do painel na recarga e o bot contradizer por cima o que a
+// pessoa acabou de combinar com uma pessoa de verdade (02/09/2026).
+const BRIDGE_URL =
+  process.env.WA_BRIDGE_URL ??
+  "https://hermes.casaldotrafego.com/whatsapp/webhook/enviar";
+const BRIDGE_BOTS: Record<string, string> = { agente24horas: "nina" };
+
 export type ActionResult = {
   ok: boolean;
   error?: string;
@@ -83,6 +93,43 @@ async function callPanel(
       data: null,
       error: "Falha de rede ao contatar o painel do Hermes.",
     };
+  }
+}
+
+/**
+ * Envia uma mensagem humana pela ponte do WhatsApp. A ponte envia pela Cloud
+ * API e, só se a Meta aceitar, grava no histórico do lead. É o que faz a
+ * mensagem sobreviver à recarga da tela.
+ */
+async function enviarPelaPonte(
+  bot: string,
+  chatId: string,
+  texto: string,
+  por: string,
+): Promise<ActionResult> {
+  const token = process.env.WA_ENVIO_TOKEN;
+  if (!token) {
+    return { ok: false, error: "WA_ENVIO_TOKEN não configurado no servidor." };
+  }
+  try {
+    const res = await fetch(BRIDGE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ bot, para: chatId, texto, por }),
+      cache: "no-store",
+    });
+    const data = (await res.json().catch(() => null)) as
+      | { ok?: boolean; erro?: string }
+      | null;
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: data?.erro ?? "Não foi possível enviar." };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Não foi possível falar com a ponte." };
   }
 }
 
@@ -203,6 +250,16 @@ export async function sendReplyAction(
     if (!chatId) return { ok: false, error: "Conversa sem contato vinculado." };
     const msg = texto.trim();
     if (!msg) return { ok: false, error: "Digite uma mensagem." };
+
+    // Caminho da ponte: envia E grava. Vem ANTES do gate de config da Meta
+    // porque quem tem as credenciais da Cloud API aqui é o servidor da ponte,
+    // não este app.
+    const bot = BRIDGE_BOTS[agent.slug];
+    if (bot) {
+      const email = await getSessionEmail();
+      const por = email ? email.split("@")[0] : "painel";
+      return enviarPelaPonte(bot, chatId, msg, por);
+    }
 
     const cfg = getMetaConfig(agent);
     if (!cfg) {
