@@ -36,6 +36,7 @@ import {
   formatNumber,
   formatPct,
   formatBRL,
+  formatReais,
   pctDelta,
   platformLabel,
   channelLabel,
@@ -199,13 +200,29 @@ function KpiCards({ d, funil }: { d: DashboardData; funil: Funil }) {
       ))}
 
       {r ? (
-        <KpiCard
-          label="Receita"
-          value={formatBRL(r.receita)}
-          icon={<DollarSign className="size-4" />}
-          tone="success"
-          hint={`${formatNumber(r.pessoas)} pessoas`}
-        />
+        <>
+          {/* ⚠️ formatReais, NUNCA formatBRL: formatBRL converte DÓLAR e
+              multiplica por 5,4. A receita das reservas já vem em real do banco
+              do restaurante, e o card mostrou R$ 150.411,33 no lugar de
+              R$ 27.854 até 03/09/2026. */}
+          <KpiCard
+            label="Receita reservada"
+            value={formatReais(r.receita)}
+            icon={<DollarSign className="size-4" />}
+            tone="accent"
+            hint={`${formatNumber(r.pessoas)} pessoas · inclui quem ainda vai jantar`}
+          />
+          {/* Só quem confirmou chegada, pelo dia do JANTAR. Régua diferente da
+              de cima (que conta pelo dia da RESERVA, pra casar com o dia do
+              anúncio pago): as duas estão certas, por isso as duas aparecem. */}
+          <KpiCard
+            label="Receita na casa"
+            value={formatReais(r.realizada.receita)}
+            icon={<DollarSign className="size-4" />}
+            tone="success"
+            hint={`${formatNumber(r.realizada.pessoas)} pessoas que compareceram`}
+          />
+        </>
       ) : null}
 
       <KpiCard
