@@ -4,6 +4,7 @@ import { getAgent, requireAgent, safeSchema, type Agent } from "./agents";
 import { assertIdent } from "./identifier";
 import { getLeadSource } from "./meta-config";
 import { expandCampaignVars, resolveVarCount } from "./utils";
+import { resolveConversationTitle } from "./conversation-title";
 
 export type PortalStat = {
   slug: string;
@@ -165,15 +166,82 @@ export async function getConversation(
   slug: string,
   sessionId: string,
 ): Promise<ConversationRow | null> {
-  const schema = await safeSchema(slug);
-  const [row] = await sql.unsafe<ConversationRow[]>(
-    `select session_id, chat_id, channel, title, started_at, ended_at,
-            message_count, cost_usd
-     from "${schema}".conversations
-     where session_id = $1 limit 1`,
-    [sessionId],
+  const agent = await requireAgent(slug);
+  const schema = assertIdent(agent.schema);
+  const src = getLeadSource(agent);
+  const temForm = src.leadSource === "form";
+  const [row] = await sql.unsafe<
+    (ConversationRow & { crm_name: string | null; form_name: string | null })[]
+  >(
+    `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
+            c.ended_at, c.message_count, c.cost_usd,
+            crm.name as crm_name,
+            ${temForm ? "form.full_name" : "null::text"} as form_name
+       from "${schema}".conversations c
+       left join lateral (
+         select l.name
+           from "${schema}".crm_leads l
+          where nullif(btrim(l.name), '') is not null
+            and (
+              (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+              or (
+                coalesce(c.channel, '') not ilike '%mail%'
+                and regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') <> ''
+                and regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') <> ''
+                and (
+                  regexp_replace(c.chat_id, '\\D', '', 'g')
+                    = regexp_replace(l.phone, '\\D', '', 'g')
+                  or (
+                    length(regexp_replace(l.phone, '\\D', '', 'g')) >= 8
+                    and right(regexp_replace(c.chat_id, '\\D', '', 'g'), 8)
+                      = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
+                  )
+                )
+              )
+            )
+          order by coalesce(l.first_contact_at, l.created_at) desc nulls last
+          limit 1
+       ) crm on true
+       ${
+         temForm
+           ? `left join lateral (
+         select l.full_name
+           from public.meta_leads l
+          where l.page_id = $2
+            and nullif(btrim(l.full_name), '') is not null
+            and (
+              (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+              or (
+                coalesce(c.channel, '') not ilike '%mail%'
+                and l.phone_norm is not null and l.phone_norm <> ''
+                and (
+                  regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+                  or (length(l.phone_norm) >= 8
+                      and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                        = right(l.phone_norm, 8))
+                )
+              )
+            )
+          order by l.created_time desc nulls last
+          limit 1
+       ) form on true`
+           : ""
+       }
+      where c.session_id = $1
+      limit 1`,
+    temForm ? [sessionId, src.pageId] : [sessionId],
   );
-  return row ?? null;
+  if (!row) return null;
+  const { crm_name, form_name, ...conversation } = row;
+  return {
+    ...conversation,
+    title: resolveConversationTitle(
+      crm_name,
+      resolveConversationTitle(form_name, conversation.title),
+    ),
+  };
 }
 
 // Conversas do bot com tag de origem + prospecção (Minerador) -----------
@@ -197,7 +265,10 @@ export async function getBotConversations(
   channel: ConvChannel,
   filter: ConvFilter = "all",
 ): Promise<BotConvRow[]> {
-  const schema = await safeSchema(slug);
+  const agent = await requireAgent(slug);
+  const schema = assertIdent(agent.schema);
+  const src = getLeadSource(agent);
+  const temForm = src.leadSource === "form";
   const conds: string[] = [
     channel === "email"
       ? "c.channel ilike '%mail%'"
@@ -209,9 +280,17 @@ export async function getBotConversations(
     conds.push("coalesce(mm.user_count, 0) >= 2");
   }
   try {
-    const rows = await sql.unsafe<(ConversationRow & { origin: string })[]>(
+    const rows = await sql.unsafe<
+      (ConversationRow & {
+        origin: string;
+        crm_name: string | null;
+        form_name: string | null;
+      })[]
+    >(
       `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
               c.ended_at, c.message_count, c.cost_usd,
+              crm.name as crm_name,
+              ${temForm ? "form.full_name" : "null::text"} as form_name,
               case
                 when exists (
                   select 1 from public.outreach_sent os
@@ -252,13 +331,71 @@ export async function getBotConversations(
                 count(*) filter (where m.role = 'user') as user_count
          from "${schema}".messages m where m.session_id = c.session_id
        ) mm on true
+       left join lateral (
+         select l.name
+           from "${schema}".crm_leads l
+          where nullif(btrim(l.name), '') is not null
+            and (
+              (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+              or (
+                coalesce(c.channel, '') not ilike '%mail%'
+                and regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') <> ''
+                and regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') <> ''
+                and (
+                  regexp_replace(c.chat_id, '\\D', '', 'g')
+                    = regexp_replace(l.phone, '\\D', '', 'g')
+                  or (
+                    length(regexp_replace(l.phone, '\\D', '', 'g')) >= 8
+                    and right(regexp_replace(c.chat_id, '\\D', '', 'g'), 8)
+                      = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
+                  )
+                )
+              )
+            )
+          order by coalesce(l.first_contact_at, l.created_at) desc nulls last
+          limit 1
+       ) crm on true
+       ${
+         temForm
+           ? `left join lateral (
+         select l.full_name
+           from public.meta_leads l
+          where l.page_id = $2
+            and nullif(btrim(l.full_name), '') is not null
+            and (
+              (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+              or (
+                coalesce(c.channel, '') not ilike '%mail%'
+                and l.phone_norm is not null and l.phone_norm <> ''
+                and (
+                  regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+                  or (length(l.phone_norm) >= 8
+                      and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                        = right(l.phone_norm, 8))
+                )
+              )
+            )
+          order by l.created_time desc nulls last
+          limit 1
+       ) form on true`
+           : ""
+       }
        where ${conds.join(" and ")}
        order by coalesce(c.ended_at, c.started_at) desc nulls last`,
-      [slug],
+      temForm ? [slug, src.pageId] : [slug],
     );
     const norm = (o: string): ConvOrigin =>
       o === "Disparo" ? "Disparo" : o === "Anúncio" ? "Anúncio" : "Direto";
-    return rows.map((r) => ({ ...r, origin: norm(r.origin) }));
+    return rows.map((r) => ({
+      ...r,
+      title: resolveConversationTitle(
+        r.crm_name,
+        resolveConversationTitle(r.form_name, r.title),
+      ),
+      origin: norm(r.origin),
+    }));
   } catch {
     return [];
   }
