@@ -4,6 +4,7 @@ import { getAgent, requireAgent, safeSchema, type Agent } from "./agents";
 import { assertIdent } from "./identifier";
 import { getLeadSource } from "./meta-config";
 import { expandCampaignVars, resolveVarCount } from "./utils";
+import { resolveConversationTitle } from "./conversation-title";
 
 export type PortalStat = {
   slug: string;
@@ -13,31 +14,59 @@ export type PortalStat = {
   lastActivity: string | null;
 };
 
-/** Recebe a lista de agentes já resolvida pelo catálogo (public.agents). */
+const PORTAL_STATS_TTL_MS = 30_000;
+let portalStatsCache: { at: number; key: string; data: Record<string, PortalStat> } | null = null;
+let portalStatsInflight: Promise<Record<string, PortalStat>> | null = null;
+
+/**
+ * Recebe a lista de agentes já resolvida pelo catálogo (public.agents).
+ *
+ * Antes disparava 2 queries por agente (conversations + messages) em
+ * Promise.all: com N agentes isso é 2N statements concorrentes na mesma pool
+ * (max 3, ver lib/db.ts) contra o pooler do Supabase. Medido em produção: com
+ * 4 agentes (8 statements) o painel TRAVA, mais de 30s sem resposta; com 1
+ * statement por agente (4 no total) fica pronto em ~2s. O pool é pequeno de
+ * propósito (evita estourar o teto de conexão do plano), então o fix é gastar
+ * menos round trips, não aumentar o pool. Uma query por agente (conversations
+ * e messages lidos juntos) corta pela metade, e o cache de 30s (mesmo TTL do
+ * catálogo em lib/agents.ts) evita repetir a rodada inteira a cada abertura
+ * do painel.
+ */
 export async function getPortalStats(
   agents: Agent[],
 ): Promise<Record<string, PortalStat>> {
-  const entries = await Promise.all(
+  const key = agents.map((a) => a.slug).sort().join(",");
+  const now = Date.now();
+  if (portalStatsCache && portalStatsCache.key === key && now - portalStatsCache.at < PORTAL_STATS_TTL_MS) {
+    return portalStatsCache.data;
+  }
+  if (portalStatsInflight) return portalStatsInflight;
+
+  portalStatsInflight = Promise.all(
     agents.map(async (a) => {
       const schema = assertIdent(a.schema);
       try {
         const [row] = await sql.unsafe<
-          { conversations: number; cost: string | null; last: string | null }[]
+          { conversations: number; messages: number; cost: string | null; last: string | null }[]
         >(
-          `select count(*)::int as conversations,
-                  coalesce(sum(cost_usd), 0)::numeric as cost,
-                  max(coalesce(ended_at, started_at)) as last
-           from "${schema}".conversations`,
-        );
-        const [msg] = await sql.unsafe<{ messages: number }[]>(
-          `select count(*)::int as messages from "${schema}".messages`,
+          `select c.conversations, c.cost, c.last, m.messages
+           from (
+             select count(*)::int as conversations,
+                    coalesce(sum(cost_usd), 0)::numeric as cost,
+                    max(coalesce(ended_at, started_at)) as last
+             from "${schema}".conversations
+           ) c,
+           (
+             select count(*)::int as messages
+             from "${schema}".messages
+           ) m`,
         );
         return [
           a.slug,
           {
             slug: a.slug,
             conversations: row?.conversations ?? 0,
-            messages: msg?.messages ?? 0,
+            messages: row?.messages ?? 0,
             cost: Number(row?.cost ?? 0),
             lastActivity: row?.last ?? null,
           },
@@ -49,8 +78,17 @@ export async function getPortalStats(
         ] as const;
       }
     }),
-  );
-  return Object.fromEntries(entries);
+  )
+    .then((entries) => {
+      const data = Object.fromEntries(entries);
+      portalStatsCache = { at: Date.now(), key, data };
+      return data;
+    })
+    .finally(() => {
+      portalStatsInflight = null;
+    });
+
+  return portalStatsInflight;
 }
 
 export type Overview = {
@@ -165,15 +203,82 @@ export async function getConversation(
   slug: string,
   sessionId: string,
 ): Promise<ConversationRow | null> {
-  const schema = await safeSchema(slug);
-  const [row] = await sql.unsafe<ConversationRow[]>(
-    `select session_id, chat_id, channel, title, started_at, ended_at,
-            message_count, cost_usd
-     from "${schema}".conversations
-     where session_id = $1 limit 1`,
-    [sessionId],
+  const agent = await requireAgent(slug);
+  const schema = assertIdent(agent.schema);
+  const src = getLeadSource(agent);
+  const temForm = src.leadSource === "form";
+  const [row] = await sql.unsafe<
+    (ConversationRow & { crm_name: string | null; form_name: string | null })[]
+  >(
+    `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
+            c.ended_at, c.message_count, c.cost_usd,
+            crm.name as crm_name,
+            ${temForm ? "form.full_name" : "null::text"} as form_name
+       from "${schema}".conversations c
+       left join lateral (
+         select l.name
+           from "${schema}".crm_leads l
+          where nullif(btrim(l.name), '') is not null
+            and (
+              (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+              or (
+                coalesce(c.channel, '') not ilike '%mail%'
+                and regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') <> ''
+                and regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') <> ''
+                and (
+                  regexp_replace(c.chat_id, '\\D', '', 'g')
+                    = regexp_replace(l.phone, '\\D', '', 'g')
+                  or (
+                    length(regexp_replace(l.phone, '\\D', '', 'g')) >= 8
+                    and right(regexp_replace(c.chat_id, '\\D', '', 'g'), 8)
+                      = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
+                  )
+                )
+              )
+            )
+          order by coalesce(l.first_contact_at, l.created_at) desc nulls last
+          limit 1
+       ) crm on true
+       ${
+         temForm
+           ? `left join lateral (
+         select l.full_name
+           from public.meta_leads l
+          where l.page_id = $2
+            and nullif(btrim(l.full_name), '') is not null
+            and (
+              (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+              or (
+                coalesce(c.channel, '') not ilike '%mail%'
+                and l.phone_norm is not null and l.phone_norm <> ''
+                and (
+                  regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') = l.phone_norm
+                  or (length(l.phone_norm) >= 8
+                      and right(regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g'), 8)
+                        = right(l.phone_norm, 8))
+                )
+              )
+            )
+          order by l.created_time desc nulls last
+          limit 1
+       ) form on true`
+           : ""
+       }
+      where c.session_id = $1
+      limit 1`,
+    temForm ? [sessionId, src.pageId] : [sessionId],
   );
-  return row ?? null;
+  if (!row) return null;
+  const { crm_name, form_name, ...conversation } = row;
+  return {
+    ...conversation,
+    title: resolveConversationTitle(
+      crm_name,
+      resolveConversationTitle(form_name, conversation.title),
+    ),
+  };
 }
 
 // Conversas do bot com tag de origem + prospecção (Minerador) -----------
@@ -222,6 +327,8 @@ type OrigemRow = ConversationRow & {
   form_platform: string | null;
   ad_name: string | null;
   campaign_name: string | null;
+  crm_name: string | null;
+  form_name: string | null;
 };
 
 /**
@@ -353,6 +460,8 @@ export async function getBotConversations(
     const rows = await sql.unsafe<OrigemRow[]>(
       `select c.session_id, c.chat_id, c.channel, c.title, c.started_at,
               c.ended_at, c.message_count, c.cost_usd,
+              crm.name as crm_name,
+              ${temForm ? "form.full_name" : "null::text"} as form_name,
               case
                 when disp.ok then 'disparo'
                 when ctwa.phone_norm is not null then 'ctwa'
@@ -375,6 +484,31 @@ export async function getBotConversations(
          from "${schema}".messages m where m.session_id = c.session_id
        ) mm on true
        left join lateral (
+         select l.name
+         from "${schema}".crm_leads l
+         where nullif(btrim(l.name), '') is not null
+           and (
+             (l.email is not null and c.chat_id is not null
+              and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+             or (
+               coalesce(c.channel, '') not ilike '%mail%'
+               and regexp_replace(coalesce(c.chat_id, ''), '\\D', '', 'g') <> ''
+               and regexp_replace(coalesce(l.phone, ''), '\\D', '', 'g') <> ''
+               and (
+                 regexp_replace(c.chat_id, '\\D', '', 'g')
+                   = regexp_replace(l.phone, '\\D', '', 'g')
+                 or (
+                   length(regexp_replace(l.phone, '\\D', '', 'g')) >= 8
+                   and right(regexp_replace(c.chat_id, '\\D', '', 'g'), 8)
+                     = right(regexp_replace(l.phone, '\\D', '', 'g'), 8)
+                 )
+               )
+             )
+           )
+         order by coalesce(l.first_contact_at, l.created_at) desc nulls last
+         limit 1
+       ) crm on true
+       left join lateral (
          select true ok from public.outreach_sent os
          where os.agent_slug = $1 and os.status = 'sent' and ${casaFone("os")}
          limit 1
@@ -389,9 +523,13 @@ export async function getBotConversations(
        ${
          temForm
            ? `left join lateral (
-         select l.phone_norm, l.platform, l.ad_name, l.campaign_name
+         select l.phone_norm, l.platform, l.ad_name, l.campaign_name, l.full_name
          from public.meta_leads l
-         where l.page_id = $2 and ${casaFone("l")}
+         where l.page_id = $2 and (
+           ${casaFone("l")}
+           or (l.email is not null and c.chat_id is not null
+               and lower(btrim(l.email)) = lower(btrim(c.chat_id)))
+         )
          order by l.created_time desc nulls last
          limit 1
        ) form on true`
@@ -401,7 +539,14 @@ export async function getBotConversations(
        order by coalesce(c.ended_at, c.started_at) desc nulls last`,
       params,
     );
-    return rows.map((r) => ({ ...r, ...classificarOrigem(r) }));
+    return rows.map((r) => ({
+      ...r,
+      title: resolveConversationTitle(
+        r.crm_name,
+        resolveConversationTitle(r.form_name, r.title),
+      ),
+      ...classificarOrigem(r),
+    }));
   } catch (e) {
     console.error(
       `[conversas] conversas do bot falharam (agente ${slug}, canal ${channel}):`,
@@ -1179,6 +1324,19 @@ function convMatch(schema: string, extra = ""): string {
   return phoneConvMatch(schema, "l", extra);
 }
 
+/**
+ * `extra` do phoneConvMatch: nessa conversa o CLIENTE falou 2 vezes ou mais.
+ *
+ * ⚠️ NÃO volte a usar `c.message_count >= 4`: ele soma as mensagens do BOT, e
+ * no Gramado isso marcava 99% das pessoas como engajadas porque a Gabi responde
+ * três vezes sozinha. Mesma regra e mesmo corte do funil da Visão geral, o
+ * motivo inteiro está em lib/funil.ts.
+ */
+function clienteFalou2(schema: string): string {
+  return `and (select count(*) from "${schema}".messages m
+               where m.session_id = c.session_id and m.role = 'user') >= 2`;
+}
+
 type SqlParam = string | number | null;
 
 async function scalar(query: string, params: SqlParam[]): Promise<number> {
@@ -1327,13 +1485,13 @@ export async function getDashboard(
         `with universe as (
            select l.phone_norm as phone_norm,
                   (${phoneConvMatch(schema, "l")}) as converted,
-                  (${phoneConvMatch(schema, "l", "and coalesce(c.message_count, 0) >= 4")}) as engaged
+                  (${phoneConvMatch(schema, "l", clienteFalou2(schema))}) as engaged
            from public.meta_leads l
            where l.page_id = $1 and l.created_time >= $2 and l.created_time < $3
            union all
            select r.phone_norm,
                   true as converted,
-                  (${phoneConvMatch(schema, "r", "and coalesce(c.message_count, 0) >= 4")}) as engaged
+                  (${phoneConvMatch(schema, "r", clienteFalou2(schema))}) as engaged
            from public.ctwa_referrals r
            where ${ctwaWhere}
          ),
