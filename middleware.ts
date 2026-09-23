@@ -67,9 +67,12 @@ function ingestStackToken(req: NextRequest): NextResponse | null {
       });
     }
     if (decoded.rn && decoded.rv) {
+      // httpOnly false: o SDK client só aceita a sessão se enxergar o refresh
+      // token em document.cookie. Com httpOnly o navegador via o usuário
+      // deslogado e mandava para /handler/sign-in.
       res.cookies.set(decoded.rn, decoded.rv, {
         path: "/",
-        httpOnly: true,
+        httpOnly: false,
         secure: true,
         sameSite: "lax",
         maxAge: 60 * 60 * 24 * 30,
