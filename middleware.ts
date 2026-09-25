@@ -16,15 +16,10 @@ const CSP_FRAME_ANCESTORS =
  * segredo (DISPATCH_CRON_SECRET) dentro da rota e responde 401 sem ele. Sem
  * esta exceção, o gate redirecionaria o cron para a tela de login e os
  * disparos parariam de sair.
- * /api/admin/diag-orgs-temp: mesma lógica do /api/dispatch, TEMPORÁRIO
- * (leitura única, valida OPS_DIAG_ORGS_KEY dentro da rota). Remover esta
- * linha junto com a rota quando a investigação terminar.
  */
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname.startsWith("/handler") ||
-    pathname.startsWith("/api/dispatch") ||
-    pathname.startsWith("/api/admin/diag-orgs-temp")
+    pathname.startsWith("/handler") || pathname.startsWith("/api/dispatch")
   );
 }
 
